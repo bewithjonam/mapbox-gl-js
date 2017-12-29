@@ -31,6 +31,22 @@ void main() {
         extrude_length - radius / (radius + stroke_width)
     );
 
+    // ----- CUSTOM STARTS
+    const float kInvPi = 1.0 / 3.14159265;
+    // Play with the following values to see their effect.
+    const float kArc = 0.5;
+    const float kOffset = 1.0 - 0.6;
+
+    float angle = atan( v_data.x, v_data.y ) * kInvPi * 0.5;
+    angle = fract( angle - kOffset );
+
+    float segment = step( angle, kArc );
+    segment *= step( 0.0, angle );
+
+    // opacity_t -= smoothstep( antialiased_blur-10, antialiased_blur+10, extrude_length - 1.0);
+    opacity_t *= mix( segment, 1.0, step( 1.0, kArc ) );
+    // ----- CUSTOM ENDS
+
     gl_FragColor = opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t);
 
 #ifdef OVERDRAW_INSPECTOR
