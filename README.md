@@ -1,3 +1,7 @@
+Publish steps:
+npm adduser bewithjonam
+npm publish
+
 [<img width="400" alt="Mapbox" src="docs/pages/assets/logo.png">](https://www.mapbox.com/)
 
 ## Fork Versions:
