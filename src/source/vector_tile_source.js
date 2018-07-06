@@ -94,9 +94,26 @@ class VectorTileSource extends Evented implements Source {
 
     loadTile(tile: Tile, callback: Callback<void>) {
         const overscaling = tile.tileID.overscaleFactor();
-        const url = normalizeURL(tile.tileID.canonical.url(this.tiles, this.scheme), this.url);
+        let url;
+        let tileSlices = [];
+        let requests = [];
+
+        if (this._options.combineTileData) {
+          this.tiles.forEach((tile) => tileSlices.push([tile]))
+        } else {
+          tileSlices.push(this.tiles);
+        }
+
+        for (let sliceIndex = 0; sliceIndex < tileSlices.length; sliceIndex++) {
+          url = normalizeURL(tile.tileID.canonical.url([this.tileSlices[sliceIndex]], this.scheme), this.url);
+          requests.push(this.map._transformRequest(url, ResourceType.Tile));
+        }
+
+        // url = [normalizeURL(tile.tileID.canonical.url(this.tiles, this.scheme), this.url)];
+        // request: this.map._transformRequest(url, ResourceType.Tile),
+
         const params = {
-            request: this.map._transformRequest(url, ResourceType.Tile),
+            requests: requests,
             uid: tile.uid,
             tileID: tile.tileID,
             zoom: tile.tileID.overscaledZ,
