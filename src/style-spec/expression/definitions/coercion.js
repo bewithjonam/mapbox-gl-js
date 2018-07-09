@@ -1,14 +1,10 @@
 // @flow
 
-const assert = require('assert');
-const {
-    ColorType,
-    ValueType,
-    NumberType,
-} = require('../types');
+import assert from 'assert';
 
-const { Color, validateRGBA } = require('../values');
-const RuntimeError = require('../runtime_error');
+import { ColorType, ValueType, NumberType } from '../types';
+import { Color, validateRGBA } from '../values';
+import RuntimeError from '../runtime_error';
 
 import type { Expression } from '../expression';
 import type ParsingContext from '../parsing_context';
@@ -97,6 +93,12 @@ class Coercion implements Expression {
     possibleOutputs() {
         return [].concat(...this.args.map((arg) => arg.possibleOutputs()));
     }
+
+    serialize() {
+        const serialized = [`to-${this.type.kind}`];
+        this.eachChild(child => { serialized.push(child.serialize()); });
+        return serialized;
+    }
 }
 
-module.exports = Coercion;
+export default Coercion;

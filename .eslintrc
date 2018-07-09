@@ -1,15 +1,23 @@
 {
   "extends": [
     "mourner",
-    "plugin:flowtype/recommended"
+    "plugin:flowtype/recommended",
+    "plugin:import/recommended"
   ],
   "parser": "babel-eslint",
   "parserOptions": {
     "sourceType": "script"
   },
   "plugins": [
-    "flowtype"
+    "flowtype",
+    "import"
   ],
+  "settings": {
+    "import/ignore": [
+        "@mapbox/shelf-pack",
+        "@mapbox/whoots-js"
+    ]
+  },
   "rules": {
     "array-bracket-spacing": "off",
     "block-scoped-var": "error",
@@ -22,6 +30,7 @@
       }
     ],
     "global-require": "off",
+    "import/no-commonjs": "error",
     "key-spacing": "off",
     "no-eq-null": "off",
     "no-lonely-if": "off",

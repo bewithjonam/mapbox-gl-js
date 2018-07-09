@@ -1,7 +1,8 @@
 // @flow
 
-const { NumberType } = require('../types');
-const { findStopLessThanOrEqualTo } = require("../stops");
+import { NumberType } from '../types';
+
+import { findStopLessThanOrEqualTo } from '../stops';
 
 import type { Stops } from '../stops';
 import type { Expression } from '../expression';
@@ -107,6 +108,17 @@ class Step implements Expression {
     possibleOutputs() {
         return [].concat(...this.outputs.map((output) => output.possibleOutputs()));
     }
+
+    serialize() {
+        const serialized = ["step", this.input.serialize()];
+        for (let i = 0; i < this.labels.length; i++) {
+            if (i > 0) {
+                serialized.push(this.labels[i]);
+            }
+            serialized.push(this.outputs[i].serialize());
+        }
+        return serialized;
+    }
 }
 
-module.exports = Step;
+export default Step;

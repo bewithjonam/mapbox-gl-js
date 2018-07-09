@@ -1,18 +1,13 @@
 // @flow
 
-const StyleLayer = require('../style_layer');
-const SymbolBucket = require('../../data/bucket/symbol_bucket');
-const resolveTokens = require('../../util/token');
-const {isExpression} = require('../../style-spec/expression');
-const assert = require('assert');
-const properties = require('./symbol_style_layer_properties');
+import StyleLayer from '../style_layer';
 
-const {
-    Transitionable,
-    Transitioning,
-    Layout,
-    PossiblyEvaluated
-} = require('../properties');
+import SymbolBucket from '../../data/bucket/symbol_bucket';
+import resolveTokens from '../../util/token';
+import { isExpression } from '../../style-spec/expression';
+import assert from 'assert';
+import properties from './symbol_style_layer_properties';
+import { Transitionable, Transitioning, Layout, PossiblyEvaluated } from '../properties';
 
 import type {BucketParameters} from '../../data/bucket';
 import type {LayoutProps, PaintProps} from './symbol_style_layer_properties';
@@ -35,7 +30,7 @@ class SymbolStyleLayer extends StyleLayer {
         super.recalculate(parameters);
 
         if (this.layout.get('icon-rotation-alignment') === 'auto') {
-            if (this.layout.get('symbol-placement') === 'line') {
+            if (this.layout.get('symbol-placement') !== 'point') {
                 this.layout._values['icon-rotation-alignment'] = 'map';
             } else {
                 this.layout._values['icon-rotation-alignment'] = 'viewport';
@@ -43,7 +38,7 @@ class SymbolStyleLayer extends StyleLayer {
         }
 
         if (this.layout.get('text-rotation-alignment') === 'auto') {
-            if (this.layout.get('symbol-placement') === 'line') {
+            if (this.layout.get('symbol-placement') !== 'point') {
                 this.layout._values['text-rotation-alignment'] = 'map';
             } else {
                 this.layout._values['text-rotation-alignment'] = 'viewport';
@@ -60,7 +55,7 @@ class SymbolStyleLayer extends StyleLayer {
     }
 
     getValueAndResolveTokens(name: *, feature: Feature) {
-        const value = this.layout.get(name).evaluate(feature);
+        const value = this.layout.get(name).evaluate(feature, {});
         const unevaluated = this._unevaluatedLayout._values[name];
         if (!unevaluated.isDataDriven() && !isExpression(unevaluated.value)) {
             return resolveTokens(feature.properties, value);
@@ -83,4 +78,4 @@ class SymbolStyleLayer extends StyleLayer {
     }
 }
 
-module.exports = SymbolStyleLayer;
+export default SymbolStyleLayer;

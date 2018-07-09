@@ -1,7 +1,8 @@
 // @flow
 
-const assert = require('assert');
-const { BooleanType } = require('../types');
+import assert from 'assert';
+
+import { BooleanType } from '../types';
 
 import type { Expression } from '../expression';
 import type ParsingContext from '../parsing_context';
@@ -75,6 +76,12 @@ class Case implements Expression {
             .concat(...this.branches.map(([_, out]) => out.possibleOutputs()))
             .concat(this.otherwise.possibleOutputs());
     }
+
+    serialize() {
+        const serialized = ["case"];
+        this.eachChild(child => { serialized.push(child.serialize()); });
+        return serialized;
+    }
 }
 
-module.exports = Case;
+export default Case;

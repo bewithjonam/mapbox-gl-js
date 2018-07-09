@@ -1,6 +1,8 @@
-'use strict';
+/* eslint-disable import/unambiguous, import/no-commonjs, no-global-assign */
 
-require('flow-remove-types/register');
+require('./stub_loader');
+require('@mapbox/flow-remove-types/register');
+require = require("esm")(module, true);
 
 const suite = require('./integration').render;
 const suiteImplementation = require('./suite_implementation');

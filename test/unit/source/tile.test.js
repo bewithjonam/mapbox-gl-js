@@ -1,17 +1,15 @@
-'use strict';
-
-const test = require('mapbox-gl-js-test').test;
-const Tile = require('../../../src/source/tile');
-const GeoJSONWrapper = require('../../../src/source/geojson_wrapper');
-const OverscaledTileID = require('../../../src/source/tile_id').OverscaledTileID;
-const fs = require('fs');
-const path = require('path');
-const vtpbf = require('vt-pbf');
-const FeatureIndex = require('../../../src/data/feature_index');
-const {CollisionBoxArray} = require('../../../src/data/array_types');
-const util = require('../../../src/util/util');
-const Context = require('../../../src/gl/context');
-const {serialize} = require('../../../src/util/web_worker_transfer');
+import { test } from 'mapbox-gl-js-test';
+import Tile from '../../../src/source/tile';
+import GeoJSONWrapper from '../../../src/source/geojson_wrapper';
+import { OverscaledTileID } from '../../../src/source/tile_id';
+import fs from 'fs';
+import path from 'path';
+import vtpbf from 'vt-pbf';
+import FeatureIndex from '../../../src/data/feature_index';
+import { CollisionBoxArray } from '../../../src/data/array_types';
+import { extend } from '../../../src/util/util';
+import Context from '../../../src/gl/context';
+import { serialize, deserialize } from '../../../src/util/web_worker_transfer';
 
 test('querySourceFeatures', (t) => {
     const features = [{
@@ -31,7 +29,10 @@ test('querySourceFeatures', (t) => {
 
         const geojsonWrapper = new GeoJSONWrapper(features);
         geojsonWrapper.name = '_geojsonTileLayer';
-        tile.rawTileData = vtpbf({ layers: { '_geojsonTileLayer': geojsonWrapper }});
+        tile.loadVectorData(
+            createVectorData({rawTileData: vtpbf({ layers: { '_geojsonTileLayer': geojsonWrapper }})}),
+            createPainter()
+        );
 
         result = [];
         tile.querySourceFeatures(result);
@@ -309,9 +310,9 @@ function createRawTileData() {
 
 function createVectorData(options) {
     const collisionBoxArray = new CollisionBoxArray();
-    return util.extend({
-        collisionBoxArray: serialize(collisionBoxArray),
-        featureIndex: serialize(new FeatureIndex(new OverscaledTileID(1, 0, 1, 1, 1))),
+    return extend({
+        collisionBoxArray: deserialize(serialize(collisionBoxArray)),
+        featureIndex: deserialize(serialize(new FeatureIndex(new OverscaledTileID(1, 0, 1, 1, 1)))),
         buckets: []
     }, options);
 }

@@ -8,7 +8,7 @@ import TopNav from './top_nav';
 import {highlightMarkup} from './prism_highlight';
 import supported from '@mapbox/mapbox-gl-supported';
 import {copy} from 'execcommand-copy';
-import examples from '@mapbox/batfish/data/examples';
+import examples from '@mapbox/batfish/data/examples'; // eslint-disable-line import/no-unresolved
 import entries from 'object.entries';
 
 const tags = {
@@ -18,6 +18,7 @@ const tags = {
     "user-interaction": "User interaction",
     "camera": "Camera",
     "controls-and-overlays": "Controls and overlays",
+    "geocoder": "Geocoder",
     "browser-support": "Browser support",
     "internationalization": "Internationalization support"
 };
@@ -92,8 +93,8 @@ ${html}
                             <div key={i} className='space-bottom1'>
                                 {!filter && <h3 className='heading'>{title}</h3>}
                                 {examples
-                                    .filter(({tags, title}) =>
-                                        tags.indexOf(tag) !== -1 && title.toLowerCase().indexOf(filter) !== -1)
+                                    .filter(({tags, title, description}) =>
+                                        tags.indexOf(tag) !== -1 && (title.toLowerCase().indexOf(filter) !== -1 || description.toLowerCase().indexOf(filter) !== -1))
                                     .map(({pathname, title}, i) =>
                                         <a key={i} href={prefixUrl(pathname)}
                                             className={`block small truncate ${title === frontMatter.title && 'active'}`}>{title}</a>

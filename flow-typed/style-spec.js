@@ -102,18 +102,21 @@ declare type RasterDEMSourceSpecification = {
     "minzoom"?: number,
     "maxzoom"?: number,
     "tileSize"?: number,
-    "attribution"?: string
+    "attribution"?: string,
+    "encoding"?: "terrarium" | "mapbox"
 }
 
 declare type GeojsonSourceSpecification = {|
     "type": "geojson",
     "data"?: mixed,
     "maxzoom"?: number,
+    "attribution"?: string,
     "buffer"?: number,
     "tolerance"?: number,
     "cluster"?: boolean,
     "clusterRadius"?: number,
-    "clusterMaxZoom"?: number
+    "clusterMaxZoom"?: number,
+    "lineMetrics"?: boolean
 |}
 
 declare type VideoSourceSpecification = {|
@@ -128,13 +131,6 @@ declare type ImageSourceSpecification = {|
     "coordinates": [[number, number], [number, number], [number, number], [number, number]]
 |}
 
-declare type CanvasSourceSpecification = {|
-    "type": "canvas",
-    "coordinates": [[number, number], [number, number], [number, number], [number, number]],
-    "animate"?: boolean,
-    "canvas": string
-|}
-
 declare type SourceSpecification =
     | VectorSourceSpecification
     | RasterSourceSpecification
@@ -142,7 +138,6 @@ declare type SourceSpecification =
     | GeojsonSourceSpecification
     | VideoSourceSpecification
     | ImageSourceSpecification
-    | CanvasSourceSpecification
 
 declare type FillLayerSpecification = {|
     "id": string,
@@ -193,7 +188,8 @@ declare type LineLayerSpecification = {|
         "line-offset"?: DataDrivenPropertyValueSpecification<number>,
         "line-blur"?: DataDrivenPropertyValueSpecification<number>,
         "line-dasharray"?: PropertyValueSpecification<Array<number>>,
-        "line-pattern"?: PropertyValueSpecification<string>
+        "line-pattern"?: PropertyValueSpecification<string>,
+        "line-gradient"?: ExpressionSpecification
     |}
 |}
 
@@ -207,7 +203,7 @@ declare type SymbolLayerSpecification = {|
     "maxzoom"?: number,
     "filter"?: FilterSpecification,
     "layout"?: {|
-        "symbol-placement"?: PropertyValueSpecification<"point" | "line">,
+        "symbol-placement"?: PropertyValueSpecification<"point" | "line" | "line-center">,
         "symbol-spacing"?: PropertyValueSpecification<number>,
         "symbol-avoid-edges"?: PropertyValueSpecification<boolean>,
         "icon-allow-overlap"?: PropertyValueSpecification<boolean>,
@@ -353,6 +349,7 @@ declare type RasterLayerSpecification = {|
         "raster-brightness-max"?: PropertyValueSpecification<number>,
         "raster-saturation"?: PropertyValueSpecification<number>,
         "raster-contrast"?: PropertyValueSpecification<number>,
+        "raster-resampling"?: PropertyValueSpecification<"linear" | "nearest">,
         "raster-fade-duration"?: PropertyValueSpecification<number>
     |}
 |}

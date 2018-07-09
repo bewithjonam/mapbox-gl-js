@@ -12,6 +12,7 @@ Fork Version | Mapbox version | Notes
 0.0.6        | 0.42.2         | Added support for finding features contributing to a cluster, so that we can spiderfy.
 0.0.7        | 0.44.0         | Upgraded fork to mapbox 0.44.0
 0.0.8        | 0.44.0         | Moved all dependencies to devDependancies in package.json, as we use the prebuilt js and don't need to have mapbox-gl-js's dependancies installed to use it.
+0.0.9        | 0.46.0         | Upgraded fork to mapbox 0.46.0
 
 ## Fork Modifications:
  * **Get Pins in Cluster**: Expose getLeaves in superCluster via an interface, so that we can get the pins in a cluster and spiderfy them. Same has been added for vectortile source with geojson endpoints and clustering

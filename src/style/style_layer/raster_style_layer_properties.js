@@ -2,15 +2,15 @@
 // @flow
 /* eslint-disable */
 
-const styleSpec = require('../../style-spec/reference/latest');
+import styleSpec from '../../style-spec/reference/latest';
 
-const {
+import {
     Properties,
     DataConstantProperty,
     DataDrivenProperty,
     CrossFadedProperty,
-    HeatmapColorProperty
-} = require('../properties');
+    ColorRampProperty
+} from '../properties';
 
 import type Color from '../../style-spec/util/color';
 
@@ -22,6 +22,7 @@ export type PaintProps = {|
     "raster-brightness-max": DataConstantProperty<number>,
     "raster-saturation": DataConstantProperty<number>,
     "raster-contrast": DataConstantProperty<number>,
+    "raster-resampling": DataConstantProperty<"linear" | "nearest">,
     "raster-fade-duration": DataConstantProperty<number>,
 |};
 
@@ -32,7 +33,8 @@ const paint: Properties<PaintProps> = new Properties({
     "raster-brightness-max": new DataConstantProperty(styleSpec["paint_raster"]["raster-brightness-max"]),
     "raster-saturation": new DataConstantProperty(styleSpec["paint_raster"]["raster-saturation"]),
     "raster-contrast": new DataConstantProperty(styleSpec["paint_raster"]["raster-contrast"]),
+    "raster-resampling": new DataConstantProperty(styleSpec["paint_raster"]["raster-resampling"]),
     "raster-fade-duration": new DataConstantProperty(styleSpec["paint_raster"]["raster-fade-duration"]),
 });
 
-module.exports = { paint };
+export default { paint };
