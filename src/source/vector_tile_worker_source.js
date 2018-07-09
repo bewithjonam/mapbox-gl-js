@@ -269,7 +269,6 @@ class VectorTileWorkerSource implements WorkerSource {
 
         const leaves = superclusterInstance.getLeaves(
             params.clusterId,
-            params.canonicalTileID.z,
             params.limit,
             params.offset
         );
