@@ -11,8 +11,6 @@ const esm = 'esm' in process.env;
 
 const ROOT_DIR = __dirname;
 
-const ROOT_DIR = __dirname;
-
 const config = [{
     input: `${__dirname}/style-spec.js`,
     output: {
