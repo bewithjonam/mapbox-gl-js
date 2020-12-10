@@ -57,6 +57,10 @@
         "intensity": 0.4
       }
     },
+    "terrain": {
+      "type": "terrain",
+      "doc": "A global modifier that elevates layers and markers based on a DEM data source."
+    },
     "sources": {
       "required": true,
       "type": "sources",
@@ -177,29 +181,20 @@
       "type": "string",
       "doc": "Contains an attribution to be displayed when the map is shown to a user."
     },
-    "geojsonTile": {
-      "type": "boolean",
-      "default": false,
-      "doc": "if true, each tile's response(expected to be a valid geojson and not in pbf) will be converted to vector tiles."
-    },
-    "cluster": {
-      "type": "boolean",
-      "default": false,
-      "doc": "If the data is a collection of point features, setting this to true clusters the points by radius into groups. Cluster groups become new `Point` features in the source with additional properties:\n * `cluster` Is `true` if the point is a cluster \n * `cluster_id` A unqiue id for the cluster to be used in conjunction with the [cluster inspection methods](https://www.mapbox.com/mapbox-gl-js/api/#geojsonsource#getclusterexpansionzoom)\n * `point_count` Number of original points grouped into this cluster\n * `point_count_abbreviated` An abbreviated point count"
-    },
-    "clusterRadius": {
-      "type": "number",
-      "default": 50,
-      "minimum": 0,
-      "doc": "Radius of each cluster if clustering is enabled. A value of 512 indicates a radius equal to the width of a tile."
-    },
-    "clusterProperties": {
-      "type": "*",
-      "doc": "An object defining custom properties on the generated clusters if clustering is enabled, aggregating values from clustered points. Has the form `{\"property_name\": [operator, map_expression]}`. `operator` is any expression function that accepts at least 2 operands (e.g. `\"+\"` or `\"max\"`) — it accumulates the property value from clusters/points the cluster contains; `map_expression` produces the value of a single point.\n\nExample: `{\"sum\": [\"+\", [\"get\", \"scalerank\"]]}`.\n\nFor more advanced use cases, in place of `operator`, you can use a custom reduce expression that references a special `[\"accumulated\"]` value, e.g.:\n`{\"sum\": [[\"+\", [\"accumulated\"], [\"get\", \"sum\"]], [\"get\", \"scalerank\"]]}`"
-    },
     "promoteId": {
       "type": "promoteId",
       "doc": "A property to use as a feature id (for feature state). Either a property name, or an object of the form `{<sourceLayer>: <propertyName>}`. If specified as a string for a vector tile source, the same property is used across all its source layers."
+    },
+    "volatile": {
+      "type": "boolean",
+      "default": false,
+      "doc": "A setting to determine whether a source's tiles are cached locally.",
+      "sdk-support": {
+        "basic functionality": {
+          "android": "9.3.0",
+          "ios": "5.10.0"
+        }
+      }
     },
     "*": {
       "type": "*",
@@ -271,6 +266,17 @@
       "type": "string",
       "doc": "Contains an attribution to be displayed when the map is shown to a user."
     },
+    "volatile": {
+      "type": "boolean",
+      "default": false,
+      "doc": "A setting to determine whether a source's tiles are cached locally.",
+      "sdk-support": {
+        "basic functionality": {
+          "android": "9.3.0",
+          "ios": "5.10.0"
+        }
+      }
+    },
     "*": {
       "type": "*",
       "doc": "Other keys to configure the data source."
@@ -341,6 +347,17 @@
       "default": "mapbox",
       "doc": "The encoding used by this source. Mapbox Terrain RGB is used by default"
     },
+    "volatile": {
+      "type": "boolean",
+      "default": false,
+      "doc": "A setting to determine whether a source's tiles are cached locally.",
+      "sdk-support": {
+        "basic functionality": {
+          "android": "9.3.0",
+          "ios": "5.10.0"
+        }
+      }
+    },
     "*": {
       "type": "*",
       "doc": "Other keys to configure the data source."
@@ -377,6 +394,10 @@
       "minimum": 0,
       "doc": "Size of the tile buffer on each side. A value of 0 produces no buffer. A value of 512 produces a buffer as wide as the tile itself. Larger values produce fewer rendering artifacts near tile edges and slower performance."
     },
+    "filter": {
+      "type": "*",
+      "doc": "An expression for filtering features prior to processing them for rendering."
+    },
     "tolerance": {
       "type": "number",
       "default": 0.375,
@@ -395,7 +416,11 @@
     },
     "clusterMaxZoom": {
       "type": "number",
-      "doc": "Max zoom on which to cluster points if clustering is enabled. Defaults to one zoom less than maxzoom (so that last zoom features are not clustered)."
+      "doc": "Max zoom on which to cluster points if clustering is enabled. Defaults to one zoom less than maxzoom (so that last zoom features are not clustered). Clusters are re-evaluated at integer zoom levels so setting clusterMaxZoom to 14 means the clusters will be displayed until z15."
+    },
+    "clusterMinPoints": {
+      "type": "number",
+      "doc": "Minimum number of points necessary to form a cluster if clustering is enabled. Defaults to `2`."
     },
     "clusterProperties": {
       "type": "*",
@@ -582,6 +607,14 @@
               "macos": "0.1.0"
             }
           }
+        },
+        "sky": {
+          "doc": "A spherical dome around the map that is always rendered behind all other layers.",
+          "sdk-support": {
+            "basic functionality": {
+              "js": "2.0.0"
+            }
+          }
         }
       },
       "doc": "Rendering type of this layer.",
@@ -633,7 +666,8 @@
     "layout_symbol",
     "layout_raster",
     "layout_hillshade",
-    "layout_background"
+    "layout_background",
+    "layout_sky"
   ],
   "layout_background": {
     "visibility": {
@@ -654,6 +688,27 @@
           "android": "2.0.1",
           "ios": "2.0.0",
           "macos": "0.1.0"
+        }
+      },
+      "property-type": "constant"
+    }
+  },
+  "layout_sky": {
+    "visibility": {
+      "type": "enum",
+      "values": {
+        "visible": {
+          "doc": "The layer is shown."
+        },
+        "none": {
+          "doc": "The layer is not shown."
+        }
+      },
+      "default": "visible",
+      "doc": "Whether this layer is displayed.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
         }
       },
       "property-type": "constant"
@@ -3109,6 +3164,15 @@
           }
         }
       },
+      "sky-radial-progress": {
+        "doc": "Gets the distance of a point on the sky from the sun position. Returns 0 at sun position and 1 when the distance reaches `sky-gradient-radius`. Can only be used in the `sky-gradient` property.",
+        "group": "sky",
+        "sdk-support": {
+          "basic functionality": {
+            "js": "2.0.0"
+          }
+        }
+      },
       "accumulated": {
         "doc": "Gets the value of a cluster property accumulated so far. Can only be used in the `clusterProperties` option of a clustered GeoJSON source.",
         "group": "Feature data",
@@ -3717,6 +3781,33 @@
       }
     }
   },
+  "terrain" : {
+    "source": {
+      "type": "string",
+      "doc": "Name of a source of `raster_dem` type to be used for terrain elevation.",
+      "required": true
+    },
+    "exaggeration": {
+      "type": "number",
+      "property-type": "data-constant",
+      "default": 1.0,
+      "minimum": 0,
+      "maximum": 1000,
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "transition": true,
+      "doc": "Exaggerates the elevation of the terrain by multiplying the data from the DEM with this value.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
+        }
+      }
+    }
+  },
   "paint": [
     "paint_fill",
     "paint_line",
@@ -3726,7 +3817,8 @@
     "paint_symbol",
     "paint_raster",
     "paint_hillshade",
-    "paint_background"
+    "paint_background",
+    "paint_sky"
   ],
   "paint_fill": {
     "fill-antialias": {
@@ -5831,6 +5923,219 @@
           "android": "2.0.1",
           "ios": "2.0.0",
           "macos": "0.1.0"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    }
+  },
+  "paint_sky": {
+    "sky-type": {
+      "type": "enum",
+      "values": {
+        "gradient": {
+          "doc": "Renders the sky with a gradient that can be configured with `sky-gradient-radius` and `sky-gradient`."
+        },
+        "atmosphere": {
+          "doc": "Renders the sky with a simulated atmospheric scattering algorithm, the sun direction can be attached to the light position or explicitly set through `sky-atmosphere-sun`."
+        }
+      },
+      "default": "atmosphere",
+      "doc": "The type of the sky",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
+        }
+      },
+      "expression": {
+        "interpolated": false,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "sky-atmosphere-sun": {
+      "type": "array",
+      "value": "number",
+      "length": 2,
+      "transition": false,
+      "doc": "Position of the sun center [a azimuthal angle, p polar angle]. The azimuthal angle indicates the position of the sun relative to 0° north, where degrees proceed clockwise. The polar angle indicates the height of the sun, where 0° is directly above, at zenith, and 90° at the horizon. When this property is ommitted, the sun center is directly inherited from the light position.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
+        }
+      },
+      "requires": [
+        {
+          "sky-type": "atmosphere"
+        }
+      ],
+      "expression": {
+        "interpolated": false,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "sky-atmosphere-sun-intensity": {
+      "type": "number",
+      "requires": [
+        {
+          "sky-type": "atmosphere"
+        }
+      ],
+      "default": 10,
+      "minimum": 0,
+      "maximum": 100,
+      "transition": false,
+      "doc": "Intensity of the sun as a light source in the atmosphere (on a scale from 0 to a 100). Setting higher values will brighten up the sky.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
+        }
+      },
+      "property-type": "data-constant"
+    },
+    "sky-gradient-center": {
+      "type": "array",
+      "requires": [
+        {
+          "sky-type": "gradient"
+        }
+      ],
+      "value": "number",
+      "default": [
+        0,
+        0
+      ],
+      "length": 2,
+      "transition": false,
+      "doc": "Position of the gradient center [a azimuthal angle, p polar angle]. The azimuthal angle indicates the position of the gradient center relative to 0° north, where degrees proceed clockwise. The polar angle indicates the height of the gradient center, where 0° is directly above, at zenith, and 90° at the horizon.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
+        }
+      },
+      "expression": {
+        "interpolated": false,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "sky-gradient-radius": {
+      "type": "number",
+      "requires": [
+        {
+          "sky-type": "gradient"
+        }
+      ],
+      "default": 90,
+      "minimum": 0,
+      "maximum": 180,
+      "transition": false,
+      "doc": "The angular distance (measured in degrees) from `sky-gradient-center` up to which the gradient extends. A value of 180 causes the gradient to wrap around to the opposite direction from `sky-gradient-center`.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
+        }
+      },
+      "expression": {
+        "interpolated": false,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "sky-gradient": {
+      "type": "color",
+      "default": [
+        "interpolate",
+        [
+          "linear"
+        ],
+        [
+          "sky-radial-progress"
+        ],
+        0.8,
+        "#87ceeb",
+        1,
+        "white"
+      ],
+      "doc": "Defines a radial color gradient with which to color the sky. The color values can be interpolated with an expression using `sky-radial-progress`. The range [0, 1] for the interpolant covers a radial distance (in degrees) of [0, `sky-gradient-radius`] centered at the position specified by `sky-gradient-center`.",
+      "transition": false,
+      "requires": [
+        {
+          "sky-type": "gradient"
+        }
+      ],
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
+        },
+        "data-driven styling": {}
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "sky-radial-progress"
+        ]
+      },
+      "property-type": "color-ramp"
+    },
+    "sky-atmosphere-halo-color": {
+      "type": "color",
+      "default": "white",
+      "doc": "A color applied to the atmosphere sun halo. The alpha channel describes how strongly the sun halo is represented in an atmosphere sky layer.",
+      "transition": false,
+      "requires": [
+        {
+          "sky-type": "atmosphere"
+        }
+      ],
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
+        }
+      },
+      "property-type": "data-constant"
+    },
+    "sky-atmosphere-color": {
+      "type": "color",
+      "default": "white",
+      "doc": "A color used to tweak the main atmospheric scattering coefficients. Using white applies the default coefficients giving the natural blue color to the atmosphere. This color affects how heavily the corresponding wavelength is represented during scattering. The alpha channel describes the density of the atmosphere, with 1 maximum density and 0 no density.",
+      "transition": false,
+      "requires": [
+        {
+          "sky-type": "atmosphere"
+        }
+      ],
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
+        }
+      },
+      "property-type": "data-constant"
+    },
+    "sky-opacity": {
+      "type": "number",
+      "default": 1,
+      "minimum": 0,
+      "maximum": 1,
+      "doc": "The opacity of the entire sky layer.",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "2.0.0"
         }
       },
       "expression": {

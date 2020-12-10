@@ -69,6 +69,7 @@ function drawCollisionDebug(painter: Painter, sourceCache: SourceCache, layer: S
             circleOffset = circleCount;
         }
         if (!buffers) continue;
+        if (painter.terrain) painter.terrain.setupElevationDraw(tile, program);
         program.draw(context, gl.LINES,
             DepthMode.disabled, StencilMode.disabled,
             painter.colorModeForRenderPass(),
@@ -78,8 +79,9 @@ function drawCollisionDebug(painter: Painter, sourceCache: SourceCache, layer: S
                 painter.transform,
                 tile),
             layer.id, buffers.layoutVertexBuffer, buffers.indexBuffer,
-            buffers.segments, null, painter.transform.zoom, null, null,
-            buffers.collisionVertexBuffer);
+            buffers.segments, null, painter.transform.zoom, null,
+            buffers.collisionVertexBuffer,
+            buffers.collisionVertexBufferExt);
     }
 
     if (!isText || !tileBatches.length) {

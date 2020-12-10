@@ -151,6 +151,15 @@ test("mapbox", (t) => {
                 t.end();
             });
 
+            t.test('removes secure params if custom API_URL is http', (t) => {
+                config.API_URL = 'http://test.example.com/api.mapbox.com';
+                t.equal(
+                    manager.normalizeSourceURL('mapbox://one.a'),
+                    'http://test.example.com/api.mapbox.com/v4/one.a.json?access_token=key'
+                );
+                t.end();
+            });
+
             t.end();
         });
 
@@ -298,6 +307,8 @@ test("mapbox", (t) => {
                 "mapbox://tiles/a.b/{z}/{x}/{y}.png");
             t.equals(manager.canonicalizeTileURL("http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.png?access_token=key", tileJSONURL),
                 "mapbox://tiles/a.b/{z}/{x}/{y}.png");
+            t.equals(manager.canonicalizeTileURL("http://api.mapbox.com/raster/v1/a.b/{z}/{x}/{y}.png?access_token=key", tileJSONURL),
+                "mapbox://raster/a.b/{z}/{x}/{y}.png");
 
             // We don't ever expect to see these inputs, but be safe anyway.
             t.equals(manager.canonicalizeTileURL("http://path"), "http://path");
@@ -317,25 +328,23 @@ test("mapbox", (t) => {
                 t.end();
             });
 
-            t.test('.normalizeTileURL inserts @2x on 2x devices', (t) => {
-                window.devicePixelRatio = 2;
+            t.test('.normalizeTileURL inserts @2x if source requests it', (t) => {
                 config.API_URL = 'http://path.png';
                 config.REQUIRE_ACCESS_TOKEN = false;
-                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png'), `http://path.png/v4/tile@2x.png`);
-                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png32'), `http://path.png/v4/tile@2x.png32`);
-                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.jpg70'), `http://path.png/v4/tile@2x.jpg70`);
-                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png?access_token=foo'), `http://path.png/v4/tile@2x.png?access_token=foo`);
-                window.devicePixelRatio = 1;
+                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png', true), `http://path.png/v4/tile@2x.png`);
+                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png32', true), `http://path.png/v4/tile@2x.png32`);
+                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.jpg70', true), `http://path.png/v4/tile@2x.jpg70`);
+                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png?access_token=foo', true), `http://path.png/v4/tile@2x.png?access_token=foo`);
                 t.end();
             });
 
-            t.test('.normalizeTileURL inserts @2x when tileSize == 512', (t) => {
+            t.test('.normalizeTileURL inserts @2x for 512 raster tiles on v4 of the api', (t) => {
                 config.API_URL = 'http://path.png';
                 config.REQUIRE_ACCESS_TOKEN = false;
-                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png', 512), `http://path.png/v4/tile@2x.png`);
-                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png32', 512), `http://path.png/v4/tile@2x.png32`);
-                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.jpg70', 512), `http://path.png/v4/tile@2x.jpg70`);
-                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png?access_token=foo', 512), `http://path.png/v4/tile@2x.png?access_token=foo`);
+                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png', false, 256), `http://path.png/v4/tile.png`);
+                t.equal(manager.normalizeTileURL('mapbox://path.png/tile.png', false, 512), `http://path.png/v4/tile@2x.png`);
+                t.equal(manager.normalizeTileURL("mapbox://raster/a.b/0/0/0.png", false, 256), `http://path.png/raster/v1/a.b/0/0/0.png`);
+                t.equal(manager.normalizeTileURL("mapbox://raster/a.b/0/0/0.png", false, 512), `http://path.png/raster/v1/a.b/0/0/0.png`);
                 t.end();
             });
 
@@ -393,6 +402,7 @@ test("mapbox", (t) => {
                 t.equal(manager.normalizeTileURL("mapbox://tiles/a.b/0/0/0.png"), `https://api.mapbox.com/v4/a.b/0/0/0.png?sku=${manager._skuToken}&access_token=key`);
                 t.equal(manager.normalizeTileURL("mapbox://tiles/a.b/0/0/0@2x.png"), `https://api.mapbox.com/v4/a.b/0/0/0@2x.png?sku=${manager._skuToken}&access_token=key`);
                 t.equal(manager.normalizeTileURL("mapbox://tiles/a.b,c.d/0/0/0.pbf"), `https://api.mapbox.com/v4/a.b,c.d/0/0/0.pbf?sku=${manager._skuToken}&access_token=key`);
+                t.equal(manager.normalizeTileURL("mapbox://raster/a.b/0/0/0.png"), `https://api.mapbox.com/raster/v1/a.b/0/0/0.png?sku=${manager._skuToken}&access_token=key`);
 
                 config.API_URL = 'https://api.example.com/';
                 t.equal(manager.normalizeTileURL("mapbox://tiles/a.b/0/0/0.png"), `https://api.example.com/v4/a.b/0/0/0.png?sku=${manager._skuToken}&access_token=key`);
@@ -763,7 +773,7 @@ test("mapbox", (t) => {
         });
 
         t.test('contains skuId and skuToken', (t) => {
-            event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
+            event.postMapLoadEvent(1, skuToken);
             const reqBody = window.server.requests[0].requestBody;
             // reqBody is a string of an array containing the event object so pick out the stringified event object and convert to an object
             const mapLoadEvent = JSON.parse(reqBody.slice(1, reqBody.length - 1));
@@ -776,14 +786,7 @@ test("mapbox", (t) => {
         t.test('does not POST when mapboxgl.ACCESS_TOKEN is not set', (t) => {
             config.ACCESS_TOKEN = null;
 
-            event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
-            t.equal(window.server.requests.length, 0);
-            t.end();
-        });
-
-        t.test('does not POST when url does not point to mapbox.com', (t) => {
-            event.postMapLoadEvent(nonMapboxTileURLs, 1, skuToken);
-
+            event.postMapLoadEvent(1, skuToken, null, () => {});
             t.equal(window.server.requests.length, 0);
             t.end();
         });
@@ -791,7 +794,7 @@ test("mapbox", (t) => {
         t.test('POSTs cn event when API_URL changes to cn endpoint', (t) => {
             config.API_URL = 'https://api.mapbox.cn';
 
-            event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
+            event.postMapLoadEvent(1, skuToken);
 
             const req = window.server.requests[0];
             req.respond(200);
@@ -802,14 +805,14 @@ test("mapbox", (t) => {
 
         t.test('POSTs no event when API_URL unavailable', (t) => {
             config.API_URL = null;
-            event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
+            event.postMapLoadEvent(1, skuToken);
             t.equal(window.server.requests.length, 0, 'no events posted');
             t.end();
         });
 
         t.test('POSTs no event when API_URL is non-standard', (t) => {
             config.API_URL = "https://api.example.com";
-            event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
+            event.postMapLoadEvent(1, skuToken);
             t.equal(window.server.requests.length, 0, 'no events posted');
             t.end();
         });
@@ -843,7 +846,7 @@ test("mapbox", (t) => {
                     anonId: 'anonymous'
                 }));
 
-                event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
+                event.postMapLoadEvent(1, skuToken);
                 const req = window.server.requests[0];
                 req.respond(200);
 
@@ -854,12 +857,12 @@ test("mapbox", (t) => {
 
             t.test('does not POST map.load event second time within same calendar day', (t) => {
                 let now = +Date.now();
-                withFixedDate(t, now, () => event.postMapLoadEvent(mapboxTileURLs, 1, skuToken));
+                withFixedDate(t, now, () => event.postMapLoadEvent(1, skuToken));
 
                 //Post second event
                 const firstEvent = now;
                 now += (60 * 1000); // A bit later
-                withFixedDate(t, now, () => event.postMapLoadEvent(mapboxTileURLs, 1, skuToken));
+                withFixedDate(t, now, () => event.postMapLoadEvent(1, skuToken));
 
                 const req = window.server.requests[0];
                 req.respond(200);
@@ -874,12 +877,12 @@ test("mapbox", (t) => {
 
             t.test('does not POST map.load event second time when clock goes backwards less than a day', (t) => {
                 let now = +Date.now();
-                withFixedDate(t, now, () => event.postMapLoadEvent(mapboxTileURLs, 1, skuToken));
+                withFixedDate(t, now, () => event.postMapLoadEvent(1, skuToken));
 
                 //Post second event
                 const firstEvent = now;
                 now -= (60 * 1000); // A bit earlier
-                withFixedDate(t, now, () => event.postMapLoadEvent(mapboxTileURLs, 1, skuToken));
+                withFixedDate(t, now, () => event.postMapLoadEvent(1, skuToken));
 
                 const req = window.server.requests[0];
                 req.respond(200);
@@ -895,7 +898,7 @@ test("mapbox", (t) => {
             t.test('POSTs map.load event when access token changes', (t) => {
                 config.ACCESS_TOKEN = 'pk.new.*';
 
-                event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
+                event.postMapLoadEvent(1, skuToken);
 
                 const req = window.server.requests[0];
                 req.respond(200);
@@ -909,7 +912,7 @@ test("mapbox", (t) => {
                 const anonId = uuid();
                 window.localStorage.setItem(`mapbox.eventData.uuid:${config.ACCESS_TOKEN}`, anonId);
                 turnstileEvent.postTurnstileEvent(mapboxTileURLs);
-                event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
+                event.postMapLoadEvent(1, skuToken);
 
                 const turnstileReq = window.server.requests[0];
                 turnstileReq.respond(200);
@@ -930,7 +933,7 @@ test("mapbox", (t) => {
 
         t.test('when LocalStorage is not available', (t) => {
             t.test('POSTs map.load event', (t) => {
-                event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
+                event.postMapLoadEvent(1, skuToken);
 
                 const req = window.server.requests[0];
                 req.respond(200);
@@ -947,8 +950,8 @@ test("mapbox", (t) => {
 
             t.test('does not POST map.load multiple times for the same map instance', (t) => {
                 const now = Date.now();
-                withFixedDate(t, now, () => event.postMapLoadEvent(mapboxTileURLs, 1, skuToken));
-                withFixedDate(t, now + 5, () => event.postMapLoadEvent(mapboxTileURLs, 1, skuToken));
+                withFixedDate(t, now, () => event.postMapLoadEvent(1, skuToken));
+                withFixedDate(t, now + 5, () => event.postMapLoadEvent(1, skuToken));
 
                 const req = window.server.requests[0];
                 req.respond(200);
@@ -964,7 +967,7 @@ test("mapbox", (t) => {
             t.test('POSTs map.load event when access token changes', (t) => {
                 config.ACCESS_TOKEN = 'pk.new.*';
 
-                event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
+                event.postMapLoadEvent(1, skuToken);
 
                 const req = window.server.requests[0];
                 req.respond(200);
@@ -980,9 +983,9 @@ test("mapbox", (t) => {
             });
 
             t.test('POSTs distinct map.load for multiple maps', (t) => {
-                event.postMapLoadEvent(mapboxTileURLs, 1, skuToken);
+                event.postMapLoadEvent(1, skuToken);
                 const now = +Date.now();
-                withFixedDate(t, now, () => event.postMapLoadEvent(mapboxTileURLs, 2, skuToken));
+                withFixedDate(t, now, () => event.postMapLoadEvent(2, skuToken));
 
                 let req = window.server.requests[0];
                 req.respond(200);
@@ -1002,9 +1005,9 @@ test("mapbox", (t) => {
 
             t.test('Queues and POSTs map.load events when triggerred in quick succession by different maps', (t) => {
                 const now = Date.now();
-                withFixedDate(t, now, () => event.postMapLoadEvent(mapboxTileURLs, 1, skuToken));
-                withFixedDate(t, now, () => event.postMapLoadEvent(mapboxTileURLs, 2, skuToken));
-                withFixedDate(t, now, () => event.postMapLoadEvent(mapboxTileURLs, 3, skuToken));
+                withFixedDate(t, now, () => event.postMapLoadEvent(1, skuToken));
+                withFixedDate(t, now, () => event.postMapLoadEvent(2, skuToken));
+                withFixedDate(t, now, () => event.postMapLoadEvent(3, skuToken));
 
                 const reqOne = window.server.requests[0];
                 reqOne.respond(200);
@@ -1023,6 +1026,56 @@ test("mapbox", (t) => {
 
                 t.end();
             });
+
+            t.end();
+        });
+
+        t.end();
+    });
+
+    t.test('MapSessionAPI', (t) => {
+        let sessionAPI;
+        const skuToken = '1234567890123';
+        t.beforeEach((callback) => {
+            window.useFakeXMLHttpRequest();
+            sessionAPI = new mapbox.MapSessionAPI();
+            callback();
+        });
+
+        t.afterEach((callback) => {
+            window.restore();
+            callback();
+        });
+
+        t.test('mapbox.getMapSessionAPI', (t) => {
+            t.ok(mapbox.getMapSessionAPI);
+            t.end();
+        });
+
+        t.test('contains access token and skuToken', (t) => {
+            sessionAPI.getSession(1, skuToken);
+            const requestURL = new URL(window.server.requests[0].url);
+            const urlParam = new URLSearchParams(requestURL.search);
+            t.equals(urlParam.get('sku'), skuToken);
+            t.equals(urlParam.get('access_token'), config.ACCESS_TOKEN);
+            t.end();
+        });
+
+        t.test('no API is sent when API_URL unavailable', (t) => {
+            config.API_URL = null;
+            sessionAPI.getSession(1, skuToken);
+            t.equal(window.server.requests.length, 0, 'no request');
+
+            t.end();
+        });
+
+        t.test('send a new request when access token changes', (t) => {
+            config.ACCESS_TOKEN = 'pk.new.*';
+            sessionAPI.getSession(1, skuToken);
+
+            const req = window.server.requests[0];
+            t.equal(req.url, `${config.API_URL + config.SESSION_PATH}?sku=${skuToken}&access_token=pk.new.*`);
+            t.equal(req.method, 'GET');
 
             t.end();
         });

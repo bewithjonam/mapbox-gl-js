@@ -76,15 +76,15 @@ test('Map', (t) => {
     t.test('initial bounds options in constructor options', (t) => {
         const bounds = [[-133, 16], [-68, 50]];
 
-        const map = (fitBoundsOptions, skipCSSStub) => {
+        const map = (fitBoundsOptions, skipCSSStub, skipAuthenticateStub) => {
             const container = window.document.createElement('div');
             Object.defineProperty(container, 'offsetWidth', {value: 512});
             Object.defineProperty(container, 'offsetHeight', {value: 512});
-            return createMap(t, {skipCSSStub, container, bounds, fitBoundsOptions});
+            return createMap(t, {skipCSSStub, skipAuthenticateStub, container, bounds, fitBoundsOptions});
         };
 
-        const unpadded = map(undefined, false);
-        const padded = map({padding: 100}, true);
+        const unpadded = map(undefined, false, true);
+        const padded = map({padding: 100}, true, true);
 
         t.ok(unpadded.getZoom() > padded.getZoom());
 
@@ -132,6 +132,7 @@ test('Map', (t) => {
 
     t.test('emits load event after a style is set', (t) => {
         t.stub(Map.prototype, '_detectMissingCSS');
+        t.stub(Map.prototype, '_authenticate');
         const map = new Map({container: window.document.createElement('div')});
 
         map.on('load', fail);
@@ -228,6 +229,7 @@ test('Map', (t) => {
 
         t.test('style transform overrides unmodified map transform', (t) => {
             t.stub(Map.prototype, '_detectMissingCSS');
+            t.stub(Map.prototype, '_authenticate');
             const map = new Map({container: window.document.createElement('div')});
             map.transform.lngRange = [-120, 140];
             map.transform.latRange = [-60, 80];
@@ -246,6 +248,7 @@ test('Map', (t) => {
 
         t.test('style transform does not override map transform modified via options', (t) => {
             t.stub(Map.prototype, '_detectMissingCSS');
+            t.stub(Map.prototype, '_authenticate');
             const map = new Map({container: window.document.createElement('div'), zoom: 10, center: [-77.0186, 38.8888]});
             t.notOk(map.transform.unmodified, 'map transform is modified by options');
             map.setStyle(createStyle());
@@ -260,6 +263,7 @@ test('Map', (t) => {
 
         t.test('style transform does not override map transform modified via setters', (t) => {
             t.stub(Map.prototype, '_detectMissingCSS');
+            t.stub(Map.prototype, '_authenticate');
             const map = new Map({container: window.document.createElement('div')});
             t.ok(map.transform.unmodified);
             map.setZoom(10);
@@ -283,6 +287,31 @@ test('Map', (t) => {
             map.setStyle(null);
             t.equal(style._remove.callCount, 1);
             t.end();
+        });
+
+        t.test('updating terrain triggers style diffing using setTerrain operation', (t) => {
+            const style = createStyle();
+            style['sources']["mapbox-dem"] = {
+                "type": "raster-dem",
+                "tiles": ['http://example.com/{z}/{x}/{y}.png'],
+                "tileSize": 256,
+                "maxzoom": 14
+            };
+            style['terrain'] = {
+                "source": "mapbox-dem"
+            };
+            const map = createMap(t, {style});
+            const initStyleObj = map.style;
+            t.spy(initStyleObj, 'setTerrain');
+            t.spy(initStyleObj, 'setState');
+            map.on('style.load', () => {
+                map.setStyle(createStyle());
+                t.equal(initStyleObj, map.style);
+                t.equal(initStyleObj.setState.callCount, 1);
+                t.equal(initStyleObj.setTerrain.callCount, 1);
+                t.ok(map.style.terrain == null);
+                t.end();
+            });
         });
 
         t.end();
@@ -324,9 +353,9 @@ test('Map', (t) => {
             map.on('load', () => {
                 const fakeTileId = new OverscaledTileID(0, 0, 0, 0, 0);
                 map.addSource('geojson', createStyleSource());
-                map.style.sourceCaches.geojson._tiles[fakeTileId.key] = new Tile(fakeTileId);
+                map.style._getSourceCache('geojson')._tiles[fakeTileId.key] = new Tile(fakeTileId);
                 t.equal(map.areTilesLoaded(), false, 'returns false if tiles are loading');
-                map.style.sourceCaches.geojson._tiles[fakeTileId.key].state = 'loaded';
+                map.style._getSourceCache('geojson')._tiles[fakeTileId.key].state = 'loaded';
                 t.equal(map.areTilesLoaded(), true, 'returns true if tiles are loaded');
                 t.end();
             });
@@ -353,6 +382,26 @@ test('Map', (t) => {
                 map.addSource('geojson', createStyleSource());
                 t.deepEqual(map.getStyle(), extend(createStyle(), {
                     sources: {geojson: createStyleSource()}
+                }));
+                t.end();
+            });
+        });
+
+        t.test('returns the style with added terrain', (t) => {
+            const style = createStyle();
+            const map = createMap(t, {style});
+
+            map.on('load', () => {
+                const terrain = {source: "terrain-source-id", exaggeration: 2};
+                map.addSource('terrain-source-id', {
+                    "type": "raster-dem",
+                    "tiles": [
+                        "local://tiles/{z}-{x}-{y}.terrain.png"
+                    ]
+                });
+                map.setTerrain(terrain);
+                t.deepEqual(map.getStyle(), extend(createStyle(), {
+                    terrain, 'sources': map.getStyle().sources
                 }));
                 t.end();
             });
@@ -606,7 +655,7 @@ test('Map', (t) => {
             [ 70.31249999999977, 57.32652122521695 ] ]));
 
         t.test('rotated bounds', (t) => {
-            const map = createMap(t, {zoom: 1, bearing: 45, skipCSSStub: true});
+            const map = createMap(t, {zoom: 1, bearing: 45, skipCSSStub: true, skipAuthenticateStub: true});
             t.deepEqual(
                 toFixed([[-49.718445552178764, -44.44541580601936], [49.7184455522, 44.445415806019355]]),
                 toFixed(map.getBounds().toArray())
@@ -887,7 +936,7 @@ test('Map', (t) => {
 
     t.test('#getMaxPitch', (t) => {
         const map = createMap(t, {pitch: 0});
-        t.equal(map.getMaxPitch(), 60, 'returns default value');
+        t.equal(map.getMaxPitch(), 85, 'returns default value');
         map.setMaxPitch(10);
         t.equal(map.getMaxPitch(), 10, 'returns custom value');
         t.end();
@@ -920,7 +969,7 @@ test('Map', (t) => {
     t.test('throw on maxPitch greater than valid maxPitch at init', (t) => {
         t.throws(() => {
             createMap(t, {maxPitch: 90});
-        }, new Error(`maxPitch must be less than or equal to 60`));
+        }, new Error(`maxPitch must be less than or equal to 85`));
         t.end();
     });
 
@@ -1019,6 +1068,22 @@ test('Map', (t) => {
 
     });
 
+    t.test('#hasControl', (t) => {
+        const map = createMap(t);
+        function Ctrl() {}
+        Ctrl.prototype = {
+            onAdd(_) {
+                return window.document.createElement('div');
+            }
+        };
+
+        const control = new Ctrl();
+        t.equal(map.hasControl(control), false, 'Reference to control is not found');
+        map.addControl(control);
+        t.equal(map.hasControl(control), true, 'Reference to control is found');
+        t.end();
+    });
+
     t.test('#project', (t) => {
         const map = createMap(t);
         t.deepEqual(map.project([0, 0]), {x: 100, y: 100});
@@ -1080,7 +1145,7 @@ test('Map', (t) => {
                 const output = map.queryRenderedFeatures(map.project(new LngLat(0, 0)));
 
                 const args = map.style.queryRenderedFeatures.getCall(0).args;
-                t.deepEqual(args[0], [{x: 100, y: 100}]); // query geometry
+                t.deepEqual(args[0], {x: 100, y: 100}); // query geometry
                 t.deepEqual(args[1], {availableImages: []}); // params
                 t.deepEqual(args[2], map.transform); // transform
                 t.deepEqual(output, []);
@@ -1128,7 +1193,7 @@ test('Map', (t) => {
 
                 map.queryRenderedFeatures(map.project(new LngLat(360, 0)));
 
-                t.deepEqual(map.style.queryRenderedFeatures.getCall(0).args[0], [{x: 612, y: 100}]);
+                t.deepEqual(map.style.queryRenderedFeatures.getCall(0).args[0], {x: 612, y: 100});
                 t.end();
             });
         });
@@ -1214,7 +1279,7 @@ test('Map', (t) => {
             });
         });
 
-        t.test('fires a data event', (t) => {
+        t.test('fires a data event on background layer', (t) => {
             // background layers do not have a source
             const map = createMap(t, {
                 style: {
@@ -1238,6 +1303,37 @@ test('Map', (t) => {
                 });
 
                 map.setLayoutProperty('background', 'visibility', 'visible');
+            });
+        });
+
+        t.test('fires a data event on sky layer', (t) => {
+            // sky layers do not have a source
+            const map = createMap(t, {
+                style: {
+                    "version": 8,
+                    "sources": {},
+                    "layers": [{
+                        "id": "sky",
+                        "type": "sky",
+                        "layout": {
+                            "visibility": "none"
+                        },
+                        "paint": {
+                            "sky-type": "atmosphere",
+                            "sky-atmosphere-sun": [0, 0]
+                        }
+                    }]
+                }
+            });
+
+            map.once('style.load', () => {
+                map.once('data', (e) => {
+                    if (e.dataType === 'style') {
+                        t.end();
+                    }
+                });
+
+                map.setLayoutProperty('sky', 'visibility', 'visible');
             });
         });
 

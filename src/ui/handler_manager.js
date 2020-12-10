@@ -22,6 +22,8 @@ import {bindAll, extend} from '../util/util';
 import window from '../util/window';
 import Point from '@mapbox/point-geometry';
 import assert from 'assert';
+import {vec3} from 'gl-matrix';
+import MercatorCoordinate, {altitudeFromMercatorZ} from '../geo/mercator_coordinate';
 
 export type InputEvent = MouseEvent | TouchEvent | KeyboardEvent | WheelEvent;
 
@@ -30,6 +32,51 @@ const isMoving = p => p.zoom || p.drag || p.pitch || p.rotate;
 class RenderFrameEvent extends Event {
     type: 'renderFrame';
     timeStamp: number;
+}
+
+class TrackingEllipsoid {
+    constants: Array<number>;
+    radius: number;
+
+    constructor() {
+        // a, b, c in the equation x²/a² + y²/b² + z²/c² = 1
+        this.constants = [1, 1, 0.01];
+        this.radius = 0;
+    }
+
+    setup(center: vec3, pointOnSurface: vec3) {
+        const centerToSurface = vec3.sub([], pointOnSurface, center);
+        if (centerToSurface[2] < 0) {
+            this.radius = vec3.length(vec3.div([], centerToSurface, this.constants));
+        } else {
+            // The point on surface is above the center. This can happen for example when the camera is
+            // below the clicked point (like a mountain) Use slightly shorter radius for less aggressive movement
+            this.radius = vec3.length([centerToSurface[0], centerToSurface[1], 0]);
+        }
+    }
+
+    // Cast a ray from the center of the ellipsoid and the intersection point.
+    projectRay(dir: vec3): vec3 {
+        // Perform the intersection test against a unit sphere
+        vec3.div(dir, dir, this.constants);
+        vec3.normalize(dir, dir);
+        vec3.mul(dir, dir, this.constants);
+
+        const intersection = vec3.scale([], dir, this.radius);
+
+        if (intersection[2] > 0) {
+            // The intersection point is above horizon so special handling is required.
+            // Otherwise direction of the movement would be inverted due to the ellipsoid shape
+            const h = vec3.scale([], [0, 0, 1], vec3.dot(intersection, [0, 0, 1]));
+            const r = vec3.scale([], vec3.normalize([], [intersection[0], intersection[1], 0]), this.radius);
+            const p = vec3.add([], intersection, vec3.scale([], vec3.sub([], vec3.add([], r, h), intersection), 2));
+
+            intersection[0] = p[0];
+            intersection[1] = p[1];
+        }
+
+        return intersection;
+    }
 }
 
 // Handlers interpret dom events and return camera changes that should be
@@ -76,6 +123,8 @@ export type HandlerResult = {|
     around?: Point | null,
     // same as above, except for pinch actions, which are given higher priority
     pinchAround?: Point | null,
+    // the point to not move when changing the camera in mercator coordinates
+    aroundCoord?: MercatorCoordinate | null,
     // A method that can fire a one-off easing by directly changing the map's camera.
     cameraAnimation?: (map: Map) => any;
 
@@ -104,8 +153,9 @@ class HandlerManager {
     _updatingCamera: boolean;
     _changes: Array<[HandlerResult, Object, any]>;
     _previousActiveHandlers: { [string]: Handler };
-    _bearingChanged: boolean;
     _listeners: Array<[HTMLElement, string, void | {passive?: boolean, capture?: boolean}]>;
+    _trackingEllipsoid: TrackingEllipsoid;
+    _dragOrigin: ?vec3;
 
     constructor(map: Map, options: { interactive: boolean, pitchWithRotate: boolean, clickTolerance: number, bearingSnap: number}) {
         this._map = map;
@@ -117,6 +167,8 @@ class HandlerManager {
         this._inertia = new HandlerInertia(map);
         this._bearingSnap = options.bearingSnap;
         this._previousActiveHandlers = {};
+        this._trackingEllipsoid = new TrackingEllipsoid();
+        this._dragOrigin = null;
 
         // Track whether map is currently moving, to compute start/move/end events
         this._eventsInProgress = {};
@@ -128,12 +180,14 @@ class HandlerManager {
         const el = this._el;
 
         this._listeners = [
-            // Bind touchstart and touchmove with passive: false because, even though
-            // they only fire a map events and therefore could theoretically be
-            // passive, binding with passive: true causes iOS not to respect
-            // e.preventDefault() in _other_ handlers, even if they are non-passive
-            // (see https://bugs.webkit.org/show_bug.cgi?id=184251)
-            [el, 'touchstart', {passive: false}],
+            // This needs to be `passive: true` so that a double tap fires two
+            // pairs of touchstart/end events in iOS Safari 13. If this is set to
+            // `passive: false` then the second pair of events is only fired if
+            // preventDefault() is called on the first touchstart. Calling preventDefault()
+            // undesirably prevents click events.
+            [el, 'touchstart', {passive: true}],
+            // This needs to be `passive: false` so that scrolls and pinches can be
+            // prevented in browsers that don't support `touch-actions: none`, for example iOS Safari 12.
             [el, 'touchmove', {passive: false}],
             [el, 'touchend', undefined],
             [el, 'touchcancel', undefined],
@@ -233,7 +287,7 @@ class HandlerManager {
         this._handlersById[handlerName] = handler;
     }
 
-    stop() {
+    stop(allowEndAnimation: boolean) {
         // do nothing if this method was triggered by a gesture update
         if (this._updatingCamera) return;
 
@@ -241,7 +295,7 @@ class HandlerManager {
             handler.reset();
         }
         this._inertia.clear();
-        this._fireEvents({}, {});
+        this._fireEvents({}, {}, allowEndAnimation);
         this._changes = [];
     }
 
@@ -291,7 +345,7 @@ class HandlerManager {
     handleEvent(e: InputEvent | RenderFrameEvent, eventName?: string) {
 
         if (e.type === 'blur') {
-            this.stop();
+            this.stop(true);
             return;
         }
 
@@ -356,7 +410,7 @@ class HandlerManager {
         const {cameraAnimation} = mergedHandlerResult;
         if (cameraAnimation) {
             this._inertia.clear();
-            this._fireEvents({}, {});
+            this._fireEvents({}, {}, true);
             this._changes = [];
             cameraAnimation(this._map);
         }
@@ -382,7 +436,6 @@ class HandlerManager {
         if (handlerResult.bearingDelta !== undefined) {
             eventsInProgress.rotate = eventData;
         }
-
     }
 
     _applyChanges() {
@@ -397,6 +450,7 @@ class HandlerManager {
             if (change.bearingDelta) combined.bearingDelta = (combined.bearingDelta || 0) + change.bearingDelta;
             if (change.pitchDelta) combined.pitchDelta = (combined.pitchDelta || 0) + change.pitchDelta;
             if (change.around !== undefined) combined.around = change.around;
+            if (change.aroundCoord !== undefined) combined.aroundCoord = change.aroundCoord;
             if (change.pinchAround !== undefined) combined.pinchAround = change.pinchAround;
             if (change.noInertia) combined.noInertia = change.noInertia;
 
@@ -413,33 +467,112 @@ class HandlerManager {
         const map = this._map;
         const tr = map.transform;
 
-        if (!hasChange(combinedResult)) {
-            return this._fireEvents(combinedEventsInProgress, deactivatedHandlers);
+        const eventStarted = (type) => {
+            const newEvent = combinedEventsInProgress[type];
+            return newEvent && !this._eventsInProgress[type];
+        };
+
+        const eventEnded = (type) => {
+            const event = this._eventsInProgress[type];
+            return event && !this._handlersById[event.handlerName].isActive();
+        };
+
+        const toVec3 = (p: MercatorCoordinate): vec3 => [p.x, p.y, p.z];
+
+        if (eventEnded("drag") && !hasChange(combinedResult)) {
+            const preZoom = tr.zoom;
+            tr.cameraElevationReference = "sea";
+            tr.recenterOnTerrain();
+            tr.cameraElevationReference = "ground";
+            // Map zoom might change during the pan operation due to terrain elevation.
+            if (preZoom !== tr.zoom) this._map._update(true);
         }
 
-        let {panDelta, zoomDelta, bearingDelta, pitchDelta, around, pinchAround} = combinedResult;
+        if (!hasChange(combinedResult)) {
+            return this._fireEvents(combinedEventsInProgress, deactivatedHandlers, true);
+        }
+        let {panDelta, zoomDelta, bearingDelta, pitchDelta, around, aroundCoord, pinchAround} = combinedResult;
 
         if (pinchAround !== undefined) {
             around = pinchAround;
         }
 
+        if (eventStarted("drag") && around) {
+            this._dragOrigin = toVec3(tr.pointCoordinate3D(around));
+            // Construct the tracking ellipsoid every time user changes the drag origin.
+            // Direction of the ray will define size of the shape and hence defining the available range of movement
+            this._trackingEllipsoid.setup(tr._camera.position, this._dragOrigin);
+        }
+
+        // All movement of the camera is done relative to the sea level
+        tr.cameraElevationReference = "sea";
+
         // stop any ongoing camera animations (easeTo, flyTo)
         map._stop(true);
 
         around = around || map.transform.centerPoint;
-        const loc = tr.pointLocation(panDelta ? around.sub(panDelta) : around);
         if (bearingDelta) tr.bearing += bearingDelta;
         if (pitchDelta) tr.pitch += pitchDelta;
-        if (zoomDelta) tr.zoom += zoomDelta;
-        tr.setLocationAtPoint(loc, around);
+        tr._updateCameraState();
+
+        // Compute Mercator 3D camera offset based on screenspace panDelta
+        const panVec = [0, 0, 0];
+        if (panDelta) {
+            assert(this._dragOrigin, '_dragOrigin should have been setup with a previous dragstart');
+            const startRay = tr.screenPointToMercatorRay(around);
+            const endRay = tr.screenPointToMercatorRay(around.sub(panDelta));
+
+            const startPoint = this._trackingEllipsoid.projectRay(startRay.dir);
+            const endPoint = this._trackingEllipsoid.projectRay(endRay.dir);
+            panVec[0] = endPoint[0] - startPoint[0];
+            panVec[1] = endPoint[1] - startPoint[1];
+        }
+
+        const originalZoom = tr.zoom;
+        // Compute Mercator 3D camera offset based on screenspace requested ZoomDelta
+        const zoomVec = [0, 0, 0];
+        if (zoomDelta) {
+            // Zoom value has to be computed relative to a secondary map plane that is created from the terrain position below the cursor.
+            // This way the zoom interpolation can be kept linear and independent of the (possible) terrain elevation
+            const pickedPosition: vec3 = aroundCoord ? toVec3(aroundCoord) : toVec3(tr.pointCoordinate3D(around));
+
+            const aroundRay = {dir: vec3.normalize([], vec3.sub([], pickedPosition, tr._camera.position))};
+            const centerRay = tr.screenPointToMercatorRay(tr.centerPoint);
+
+            if (aroundRay.dir[2] < 0) {
+                // Compute center point on the elevated map plane by casting a ray from the center of the screen.
+                // ZoomDelta is then subtracted from the relative zoom value and converted to a movement vector
+                const pickedAltitude = altitudeFromMercatorZ(pickedPosition[2], pickedPosition[1]);
+                const centerOnTargetPlane = tr.rayIntersectionCoordinate(tr.pointRayIntersection(tr.centerPoint, pickedAltitude));
+                const movement = tr.zoomDeltaToMovement(toVec3(centerOnTargetPlane), zoomDelta) * (centerRay.dir[2] / aroundRay.dir[2]);
+
+                vec3.scale(zoomVec, aroundRay.dir, movement);
+            } else if (tr._terrainEnabled()) {
+                // Special handling is required if the ray created from the cursor is heading up.
+                // This scenario is possible if user is trying to zoom towards e.g. a hill or a mountain.
+                // Convert zoomDelta to a movement vector as if the camera would be orbiting around the picked point
+                const movement = tr.zoomDeltaToMovement(pickedPosition, zoomDelta);
+                vec3.scale(zoomVec, aroundRay.dir, movement);
+            }
+        }
+
+        // Mutate camera state via CameraAPI
+        const translation = vec3.add(panVec, panVec, zoomVec);
+        tr._translateCameraConstrained(translation);
+
+        if (zoomDelta && Math.abs(tr.zoom - originalZoom) > 0.0001) {
+            tr.recenterOnTerrain();
+        }
+
+        tr.cameraElevationReference = "ground";
 
         this._map._update();
         if (!combinedResult.noInertia) this._inertia.record(combinedResult);
-        this._fireEvents(combinedEventsInProgress, deactivatedHandlers);
+        this._fireEvents(combinedEventsInProgress, deactivatedHandlers, true);
 
     }
 
-    _fireEvents(newEventsInProgress: { [string]: Object }, deactivatedHandlers: Object) {
+    _fireEvents(newEventsInProgress: { [string]: Object }, deactivatedHandlers: Object, allowEndAnimation: boolean) {
 
         const wasMoving = isMoving(this._eventsInProgress);
         const nowMoving = isMoving(newEventsInProgress);
@@ -462,8 +595,6 @@ class HandlerManager {
         for (const name in startEvents) {
             this._fireEvent(name, startEvents[name]);
         }
-
-        if (newEventsInProgress.rotate) this._bearingChanged = true;
 
         if (nowMoving) {
             this._fireEvent('move', nowMoving.originalEvent);
@@ -491,7 +622,7 @@ class HandlerManager {
         }
 
         const stillMoving = isMoving(this._eventsInProgress);
-        if ((wasMoving || nowMoving) && !stillMoving) {
+        if (allowEndAnimation && (wasMoving || nowMoving) && !stillMoving) {
             this._updatingCamera = true;
             const inertialEase = this._inertia._onMoveEnd(this._map.dragPan._inertiaOptions);
 
@@ -508,7 +639,6 @@ class HandlerManager {
                     this._map.resetNorth();
                 }
             }
-            this._bearingChanged = false;
             this._updatingCamera = false;
         }
 
@@ -518,16 +648,20 @@ class HandlerManager {
         this._map.fire(new Event(type, e ? {originalEvent: e} : {}));
     }
 
-    _triggerRenderFrame() {
-        if (this._frameId === undefined) {
-            this._frameId = this._map._requestRenderFrame(timeStamp => {
-                delete this._frameId;
-                this.handleEvent(new RenderFrameEvent('renderFrame', {timeStamp}));
-                this._applyChanges();
-            });
-        }
+    _requestFrame() {
+        this._map.triggerRepaint();
+        return this._map._renderTaskQueue.add(timeStamp => {
+            delete this._frameId;
+            this.handleEvent(new RenderFrameEvent('renderFrame', {timeStamp}));
+            this._applyChanges();
+        });
     }
 
+    _triggerRenderFrame() {
+        if (this._frameId === undefined) {
+            this._frameId = this._requestFrame();
+        }
+    }
 }
 
 export default HandlerManager;

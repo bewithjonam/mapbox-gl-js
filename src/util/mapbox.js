@@ -1,9 +1,9 @@
 // @flow
 
-/***** START WARNING - IF YOU USE THIS CODE WITH MAPBOX MAPPING APIS, REMOVAL OR
-* MODIFICATION OF THE FOLLOWING CODE VIOLATES THE MAPBOX TERMS OF SERVICE  ******
-* The following code is used to access Mapbox's Mapping APIs. Removal or modification
-* of this code when used with Mapbox's Mapping APIs can result in higher fees and/or
+/***** START WARNING REMOVAL OR MODIFICATION OF THE
+* FOLLOWING CODE VIOLATES THE MAPBOX TERMS OF SERVICE  ******
+* The following code is used to access Mapbox's APIs. Removal or modification
+* of this code can result in higher fees and/or
 * termination of your account with Mapbox.
 *
 * Under the Mapbox Terms of Service, you may not use this code to access Mapbox
@@ -14,14 +14,12 @@
 ******************************************************************************/
 
 import config from './config';
-
-import browser from './browser';
 import window from './window';
 import webpSupported from './webp_supported';
 import {createSkuToken, SKU_ID} from './sku_token';
 import {version as sdkVersion} from '../../package.json';
 import {uuid, validateUuid, storageAvailable, b64DecodeUnicode, b64EncodeUnicode, warnOnce, extend} from './util';
-import {postData, ResourceType} from './ajax';
+import {postData, ResourceType, getData} from './ajax';
 
 import type {RequestParameters} from './ajax';
 import type {Cancelable} from '../types/cancelable';
@@ -36,6 +34,8 @@ type UrlObject = {|
     path: string,
     params: Array<string>
 |};
+
+export const AUTH_ERR_MSG: string = 'NO_ACCESS_TOKEN';
 
 export class RequestManager {
     _skuToken: string;
@@ -101,7 +101,7 @@ export class RequestManager {
         return this._makeAPIURL(urlObject, this._customAccessToken || accessToken);
     }
 
-    normalizeTileURL(tileURL: string, tileSize?: ?number): string {
+    normalizeTileURL(tileURL: string, use2x?: boolean, rasterTileSize?: number): string {
         if (this._isSkuTokenExpired()) {
             this._createSkuToken();
         }
@@ -110,16 +110,21 @@ export class RequestManager {
 
         const urlObject = parseUrl(tileURL);
         const imageExtensionRe = /(\.(png|jpg)\d*)(?=$)/;
-        const tileURLAPIPrefixRe = /^.+\/v4\//;
-
-        // The v4 mapbox tile API supports 512x512 image tiles only when @2x
-        // is appended to the tile URL. If `tileSize: 512` is specified for
-        // a Mapbox raster source force the @2x suffix even if a non hidpi device.
-        const suffix = browser.devicePixelRatio >= 2 || tileSize === 512 ? '@2x' : '';
         const extension = webpSupported.supported ? '.webp' : '$1';
+
+        // The v4 mapbox tile API supports 512x512 image tiles but they must be requested as '@2x' tiles.
+        const use2xAs512 = rasterTileSize && urlObject.authority !== 'raster' && rasterTileSize === 512;
+
+        const suffix = use2x || use2xAs512 ? '@2x' : '';
         urlObject.path = urlObject.path.replace(imageExtensionRe, `${suffix}${extension}`);
-        urlObject.path = urlObject.path.replace(tileURLAPIPrefixRe, '/');
-        urlObject.path = `/v4${urlObject.path}`;
+
+        if (urlObject.authority === 'raster') {
+            urlObject.path = `/${config.RASTER_URL_PREFIX}${urlObject.path}`;
+        } else {
+            const tileURLAPIPrefixRe = /^.+\/v4\//;
+            urlObject.path = urlObject.path.replace(tileURLAPIPrefixRe, '/');
+            urlObject.path = `/${config.TILE_URL_VERSION}${urlObject.path}`;
+        }
 
         const accessToken = this._customAccessToken || getAccessToken(urlObject.params) || config.ACCESS_TOKEN;
         if (config.REQUIRE_ACCESS_TOKEN && accessToken && this._skuToken) {
@@ -130,20 +135,26 @@ export class RequestManager {
     }
 
     canonicalizeTileURL(url: string, removeAccessToken: boolean) {
-        const version = "/v4/";
         // matches any file extension specified by a dot and one or more alphanumeric characters
         const extensionRe = /\.[\w]+$/;
 
         const urlObject = parseUrl(url);
         // Make sure that we are dealing with a valid Mapbox tile URL.
-        // Has to begin with /v4/, with a valid filename + extension
-        if (!urlObject.path.match(/(^\/v4\/)/) || !urlObject.path.match(extensionRe)) {
+        // Has to begin with /v4/ or /raster/v1, with a valid filename + extension
+        if (!urlObject.path.match(/^(\/v4\/|\/raster\/v1\/)/) || !urlObject.path.match(extensionRe)) {
             // Not a proper Mapbox tile URL.
             return url;
         }
         // Reassemble the canonical URL from the parts we've parsed before.
-        let result = "mapbox://tiles/";
-        result +=  urlObject.path.replace(version, '');
+        let result = "mapbox://";
+        if (urlObject.path.match(/^\/raster\/v1\//)) {
+            // If the tile url has /raster/v1/, make the final URL mapbox://raster/....
+            const rasterPrefix = `/${config.RASTER_URL_PREFIX}/`;
+            result += `raster/${urlObject.path.replace(rasterPrefix, '')}`;
+        } else {
+            const tilesPrefix = `/${config.TILE_URL_VERSION}/`;
+            result += `tiles/${urlObject.path.replace(tilesPrefix, '')}`;
+        }
 
         // Append the query string, minus the access token parameter.
         let params = urlObject.params;
@@ -172,6 +183,11 @@ export class RequestManager {
         const apiUrlObject = parseUrl(config.API_URL);
         urlObject.protocol = apiUrlObject.protocol;
         urlObject.authority = apiUrlObject.authority;
+
+        if (urlObject.protocol === 'http') {
+            const i = urlObject.params.indexOf('secure');
+            if (i >= 0) urlObject.params.splice(i, 1);
+        }
 
         if (apiUrlObject.path !== '/') {
             urlObject.path = `${apiUrlObject.path}${urlObject.path}`;
@@ -256,7 +272,7 @@ function parseAccessToken(accessToken: ?string) {
     }
 }
 
-type TelemetryEventType = 'appUserTurnstile' | 'map.load';
+type TelemetryEventType = 'appUserTurnstile' | 'map.load' | 'map.auth';
 
 class TelemetryEvent {
     eventData: any;
@@ -372,6 +388,7 @@ class TelemetryEvent {
 export class MapLoadEvent extends TelemetryEvent {
     +success: {[_: number]: boolean};
     skuToken: string;
+    errorCb: (err: ?Error) => void;
 
     constructor() {
         super('map.load');
@@ -379,16 +396,16 @@ export class MapLoadEvent extends TelemetryEvent {
         this.skuToken = '';
     }
 
-    postMapLoadEvent(tileUrls: Array<string>, mapId: number, skuToken: string, customAccessToken: string) {
-        //Enabled only when Mapbox Access Token is set and a source uses
-        // mapbox tiles.
+    postMapLoadEvent(mapId: number, skuToken: string, customAccessToken: string, callback: (err: ?Error) => void) {
         this.skuToken = skuToken;
+        this.errorCb = callback;
 
-        if (config.EVENTS_URL &&
-            customAccessToken || config.ACCESS_TOKEN &&
-            Array.isArray(tileUrls) &&
-            tileUrls.some(url => isMapboxURL(url) || isMapboxHTTPURL(url))) {
-            this.queueRequest({id: mapId, timestamp: Date.now()}, customAccessToken);
+        if (config.EVENTS_URL) {
+            if (customAccessToken || config.ACCESS_TOKEN) {
+                this.queueRequest({id: mapId, timestamp: Date.now()}, customAccessToken);
+            } else {
+                this.errorCb(new Error('A valid Mapbox access token is required to use Mapbox GL JS. To create an account or a new access token, visit https://account.mapbox.com/'));
+            }
         }
     }
 
@@ -408,7 +425,72 @@ export class MapLoadEvent extends TelemetryEvent {
         }
 
         this.postEvent(timestamp, {skuToken: this.skuToken}, (err) => {
-            if (!err) {
+            if (err) {
+                this.errorCb(err);
+            } else {
+                if (id) this.success[id] = true;
+            }
+
+        }, customAccessToken);
+    }
+}
+
+export class MapSessionAPI extends TelemetryEvent {
+    +success: {[_: number]: boolean};
+    skuToken: string;
+    errorCb: (err: ?Error) => void;
+
+    constructor() {
+        super('map.auth');
+        this.success = {};
+        this.skuToken = '';
+    }
+
+    getSession(timestamp: number, token: string, callback: (err: ?Error) => void, customAccessToken?: ?string) {
+        if (!config.API_URL || !config.SESSION_PATH) return;
+        const authUrlObject: UrlObject = parseUrl(config.API_URL + config.SESSION_PATH);
+        authUrlObject.params.push(`sku=${token || ''}`);
+        authUrlObject.params.push(`access_token=${customAccessToken || config.ACCESS_TOKEN || ''}`);
+
+        const request: RequestParameters = {
+            url: formatUrl(authUrlObject),
+            headers: {
+                'Content-Type': 'text/plain', //Skip the pre-flight OPTIONS request
+            }
+        };
+
+        this.pendingRequest = getData(request, (error) => {
+            this.pendingRequest = null;
+            callback(error);
+            this.saveEventData();
+            this.processRequests(customAccessToken);
+        });
+    }
+
+    getSessionAPI(mapId: number, skuToken: string, customAccessToken: string, callback: (err: ?Error) => void) {
+        this.skuToken = skuToken;
+        this.errorCb = callback;
+
+        if (config.SESSION_PATH && config.API_URL) {
+            if (customAccessToken || config.ACCESS_TOKEN) {
+                this.queueRequest({id: mapId, timestamp: Date.now()}, customAccessToken);
+            } else {
+                this.errorCb(new Error(AUTH_ERR_MSG));
+            }
+        }
+    }
+
+    processRequests(customAccessToken?: ?string) {
+        if (this.pendingRequest || this.queue.length === 0) return;
+        const {id, timestamp} = this.queue.shift();
+
+        // Only one load event should fire per map
+        if (id && this.success[id]) return;
+
+        this.getSession(timestamp, this.skuToken, (err) => {
+            if (err) {
+                this.errorCb(err);
+            } else {
                 if (id) this.success[id] = true;
             }
         }, customAccessToken);
@@ -481,6 +563,9 @@ export const postTurnstileEvent = turnstileEvent_.postTurnstileEvent.bind(turnst
 
 const mapLoadEvent_ = new MapLoadEvent();
 export const postMapLoadEvent = mapLoadEvent_.postMapLoadEvent.bind(mapLoadEvent_);
+
+const mapSessionAPI_ = new MapSessionAPI();
+export const getMapSessionAPI = mapSessionAPI_.getSessionAPI.bind(mapSessionAPI_);
 
 /***** END WARNING - REMOVAL OR MODIFICATION OF THE
 PRECEDING CODE VIOLATES THE MAPBOX TERMS OF SERVICE  ******/

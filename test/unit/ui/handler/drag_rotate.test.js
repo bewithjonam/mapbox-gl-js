@@ -8,6 +8,7 @@ import browser from '../../../../src/util/browser';
 
 function createMap(t, options) {
     t.stub(Map.prototype, '_detectMissingCSS');
+    t.stub(Map.prototype, '_authenticate');
     return new Map(extend({container: DOM.create('div', '', window.document.body)}, options));
 }
 
@@ -499,7 +500,7 @@ test('DragRotateHandler ends rotation if the window blurs (#3389)', (t) => {
 
 test('DragRotateHandler requests a new render frame after each mousemove event', (t) => {
     const map = createMap(t);
-    const requestRenderFrame = t.spy(map, '_requestRenderFrame');
+    const requestRenderFrame = t.spy(map.handlers, '_requestFrame');
 
     // Prevent inertial rotation.
     t.stub(browser, 'now').returns(0);

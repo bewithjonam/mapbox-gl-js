@@ -2,6 +2,7 @@ import {test} from '../../../util/test';
 import config from '../../../../src/util/config';
 import AttributionControl from '../../../../src/ui/control/attribution_control';
 import {createMap as globalCreateMap} from '../../../util';
+import simulate from '../../../util/simulate_interaction';
 
 function createMap(t) {
     config.ACCESS_TOKEN = 'pk.123';
@@ -72,6 +73,28 @@ test('AttributionControl appears in compact mode if container is less then 640 p
     map.resize();
 
     t.equal(container.querySelectorAll('.mapboxgl-ctrl-attrib.mapboxgl-compact').length, 1);
+    t.end();
+});
+
+test('AttributionControl compact mode control toggles attribution', (t) => {
+    const map = createMap(t);
+    map.addControl(new AttributionControl({
+        compact: true
+    }));
+
+    const container = map.getContainer();
+    const toggle = container.querySelector('.mapboxgl-ctrl-attrib-button');
+
+    t.equal(container.querySelectorAll('.mapboxgl-compact-show').length, 0);
+
+    simulate.click(toggle);
+
+    t.equal(container.querySelectorAll('.mapboxgl-compact-show').length, 1);
+
+    simulate.click(toggle);
+
+    t.equal(container.querySelectorAll('.mapboxgl-compact-show').length, 0);
+
     t.end();
 });
 
@@ -233,6 +256,30 @@ test('AttributionControl hides attributions for sources that are not currently v
     map.on('data', (e) => {
         if (e.dataType === 'source' && e.sourceDataType === 'metadata') {
             if (++times === 3) {
+                t.equal(attribution._innerContainer.innerHTML, 'Used');
+                t.end();
+            }
+        }
+    });
+});
+
+test('AttributionControl toggles attributions for sources whose visibility changes when zooming', (t) => {
+    const map = createMap(t);
+    const attribution = new AttributionControl();
+    map.addControl(attribution);
+
+    map.on('load', () => {
+        map.addSource('1', {type: 'geojson', data: {type: 'FeatureCollection', features: []}, attribution: 'Used'});
+        map.addLayer({id: '1', type: 'fill', source: '1', minzoom: 12});
+    });
+
+    map.on('data', (e) => {
+        if (e.dataType === 'source' && e.sourceDataType === 'metadata') {
+            t.equal(attribution._innerContainer.innerHTML, '');
+            map.setZoom(13);
+        }
+        if (e.dataType === 'source' && e.sourceDataType === 'visibility') {
+            if (map.getZoom() === 13) {
                 t.equal(attribution._innerContainer.innerHTML, 'Used');
                 t.end();
             }

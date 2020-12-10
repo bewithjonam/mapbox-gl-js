@@ -1,3 +1,25 @@
+## 13.17.0
+
+### ✨ Features and improvements
+* Add a `filter` option for GeoJSON sources to filter out features prior to processing (e.g. before clustering). [#9864](https://github.com/mapbox/mapbox-gl-js/pull/9864)
+
+## 13.16.0
+
+### ✨ Features and improvements
+* Added `volatile` source property to control storing the tiles in local storage. ([9702](https://github.com/mapbox/mapbox-gl-js/pull/9702))
+
+* Added `clusterMinPoints` option for clustered GeoJSON sources that defines the minimum number of points to form a cluster. ([#9748](https://github.com/mapbox/mapbox-gl-js/pull/9748))
+
+## 13.15.0
+
+### ✨ Features and improvements
+* Add `distance` expression to `style-spec`. This expression returns the shortest distance between a feature and an input geometry ([#9655](https://github.com/mapbox/mapbox-gl-js/pull/9655))
+
+## 13.14.0
+
+### ✨ Features and improvements
+* Add `index-of` and `slice` expressions to search arrays and strings for the first occurrence of a specified value and return a section of the original array or string ([#9450](https://github.com/mapbox/mapbox-gl-js/pull/9450)) (h/t [lbutler](https://github.com/lbutler))
+
 ## 13.13.1
 
 ### ✨ Features and improvements

@@ -34,6 +34,24 @@ test('VectorTileWorkerSource#abortTile aborts pending request', (t) => {
     t.end();
 });
 
+test('VectorTileWorkerSource#abortTile aborts pending async request', (t) => {
+    const source = new VectorTileWorkerSource(actor, new StyleLayerIndex(), [], (params, cb) => {
+        setTimeout(() => {
+            cb(null, {});
+        }, 0);
+    });
+
+    source.loadTile({
+        uid: 0,
+        tileID: {overscaledZ: 0, wrap: 0, canonical: {x: 0, y: 0, z: 0, w: 0}}
+    }, (err, res) => {
+        t.false(err);
+        t.false(res);
+        t.end();
+    });
+    source.abortTile({uid: 0}, () => {});
+});
+
 test('VectorTileWorkerSource#removeTile removes loaded tile', (t) => {
     const source = new VectorTileWorkerSource(actor, new StyleLayerIndex(), []);
 
@@ -253,13 +271,18 @@ test('VectorTileWorkerSource provides resource timing information (fallback meth
     }]);
 
     const source = new VectorTileWorkerSource(actor, layerIndex, [], loadVectorData);
+    const url = 'http://localhost:2900/faketile.pbf';
 
-    const sampleMarks = [100, 350];
+    const sampleMarks = {};
+    sampleMarks[`${url}#start`] = 100;
+    sampleMarks[`${url}#end`] = 350;
     const marks = {};
     const measures = {};
     t.stub(perf, 'getEntriesByName').callsFake((name) => { return measures[name] || []; });
     t.stub(perf, 'mark').callsFake((name) => {
-        marks[name] = sampleMarks.shift();
+        if (sampleMarks[name]) {
+            marks[name] = sampleMarks[name];
+        }
         return null;
     });
     t.stub(perf, 'measure').callsFake((name, start, end) => {
@@ -279,7 +302,7 @@ test('VectorTileWorkerSource provides resource timing information (fallback meth
         source: 'source',
         uid: 0,
         tileID: {overscaledZ: 0, wrap: 0, canonical: {x: 0, y: 0, z: 0, w: 0}},
-        request: {url: 'http://localhost:2900/faketile.pbf', collectResourceTiming: true}
+        request: {url, collectResourceTiming: true}
     }, (err, res) => {
         t.false(err);
         t.deepEquals(res.resourceTiming[0], {"duration": 250, "entryType": "measure", "name": "http://localhost:2900/faketile.pbf", "startTime": 100}, 'resourceTiming resp is expected');

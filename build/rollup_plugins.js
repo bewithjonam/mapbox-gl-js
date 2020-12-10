@@ -1,6 +1,5 @@
 
 import flowRemoveTypes from '@mapbox/flow-remove-types';
-import buble from 'rollup-plugin-buble';
 import resolve from 'rollup-plugin-node-resolve';
 import commonjs from 'rollup-plugin-commonjs';
 import unassert from 'rollup-plugin-unassert';
@@ -9,27 +8,31 @@ import {terser} from 'rollup-plugin-terser';
 import minifyStyleSpec from './rollup_plugin_minify_style_spec';
 import {createFilter} from 'rollup-pluginutils';
 import strip from '@rollup/plugin-strip';
+import replace from 'rollup-plugin-replace';
 
 // Common set of plugins/transformations shared across different rollup
 // builds (main mapboxgl bundle, style-spec package, benchmarks bundle)
 
-export const plugins = (minified, production) => [
+export const plugins = (minified, production, test, bench) => [
     flow(),
     minifyStyleSpec(),
     json(),
     production ? strip({
         sourceMap: true,
-        functions: ['PerformanceUtils.*', 'Debug.*']
+        functions: ['PerformanceUtils.*', 'WorkerPerformanceUtils.*', 'Debug.*']
+    }) : false,
+    production || bench ? unassert() : false,
+    test ? replace({
+        'process.env.CI': JSON.stringify(process.env.CI),
+        'process.env.UPDATE': JSON.stringify(process.env.UPDATE)
     }) : false,
     glsl('./src/shaders/*.glsl', production),
-    buble({transforms: {dangerousForOf: true}, objectAssign: "Object.assign"}),
     minified ? terser({
         compress: {
             pure_getters: true,
             passes: 3
         }
     }) : false,
-    production ? unassert() : false,
     resolve({
         browser: true,
         preferBuiltins: false
@@ -68,7 +71,7 @@ function glsl(include, minify) {
                     .replace(/\n+/g, '\n') // collapse multi line breaks
                     .replace(/\n\s+/g, '\n') // strip identation
                     .replace(/\s?([+-\/*=,])\s?/g, '$1') // strip whitespace around operators
-                    .replace(/([;\(\),\{\}])\n(?=[^#])/g, '$1'); // strip more line breaks
+                    .replace(/([;,\{\}])\n(?=[^#])/g, '$1'); // strip more line breaks
             }
 
             return {

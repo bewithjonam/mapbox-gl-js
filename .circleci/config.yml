@@ -22,20 +22,6 @@ workflows:
           filters:
             tags:
               only: /.*/
-      - check-size:
-          requires:
-            - build
-          filters:
-            tags:
-              only: /.*/
-      - collect-stats:
-          requires:
-            - build
-          filters:
-            tags:
-              ignore: /.*/
-            branches:
-              only: master
       - test-flow:
           requires:
             - prepare
@@ -86,7 +72,7 @@ workflows:
               only: /v[0-9]+.[0-9]+.[0-9]+(-.+)?/
             branches:
               only:
-                - master
+                - main
                 - /release-.*/
       - deploy-release:
           requires:
@@ -157,6 +143,18 @@ jobs:
       - run: yarn run build-style-spec
       - run: yarn run build-flow-types
       - run: yarn run test-build
+      - run:
+          name: Check bundle size
+          command: |
+            node build/check-bundle-size.js
+      - deploy:
+          name: Trigger memory metrics when merging to main
+          command: |
+            if [ -n "${WEB_METRICS_TOKEN}" ]; then
+              if [[ $CIRCLE_BRANCH == main ]]; then
+                curl -X POST https://circleci.com/api/v1.1/project/github/mapbox/web-metrics/build?circle-token=${WEB_METRICS_TOKEN}
+              fi
+            fi
       - store_artifacts:
           path: "dist"
       - store_artifacts:
@@ -165,30 +163,6 @@ jobs:
           root: .
           paths:
             - dist
-
-  check-size:
-    <<: *defaults
-    steps:
-      - attach_workspace:
-          at: .
-      - run:
-          name: Check bundle size
-          command: |
-            node build/check-bundle-size.js "dist/mapbox-gl.js" "JS"
-            node build/check-bundle-size.js "dist/mapbox-gl.css" "CSS"
-
-  collect-stats:
-    <<: *defaults
-    steps:
-      - attach_workspace:
-          at: .
-      - run:
-          name: Collect performance stats
-          command: node bench/gl-stats.js
-      - aws-cli/install
-      - run:
-          name: Upload performance stats
-          command: aws s3 cp data.json.gz s3://mapbox-loading-dock/raw/gl_js.perf_metrics_staging/ci/`git show -s --date=short --format=%cd-%h HEAD`.json.gz
 
   test-flow:
     <<: *defaults
@@ -209,7 +183,10 @@ jobs:
     steps:
       - attach_workspace:
           at: .
+      - run: yarn run build-token
       - run: yarn run test-render
+      - store_test_results:
+          path: test/integration/render-tests
       - store_artifacts:
           path: "test/integration/render-tests/index.html"
 

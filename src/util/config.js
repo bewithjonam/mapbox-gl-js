@@ -3,8 +3,11 @@
 type Config = {|
   API_URL: string,
   EVENTS_URL: ?string,
+  SESSION_PATH: string,
   FEEDBACK_URL: string,
   REQUIRE_ACCESS_TOKEN: boolean,
+  TILE_URL_VERSION: string,
+  RASTER_URL_PREFIX: string,
   ACCESS_TOKEN: ?string,
   MAX_PARALLEL_IMAGE_REQUESTS: number
 |};
@@ -21,7 +24,10 @@ const config: Config = {
             return null;
         }
     },
+    SESSION_PATH: '/map-sessions/v1',
     FEEDBACK_URL: 'https://apps.mapbox.com/feedback',
+    TILE_URL_VERSION: 'v4',
+    RASTER_URL_PREFIX: 'raster/v1',
     REQUIRE_ACCESS_TOKEN: true,
     ACCESS_TOKEN: null,
     MAX_PARALLEL_IMAGE_REQUESTS: 16

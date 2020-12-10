@@ -1,5 +1,3 @@
-const float PI = 3.141592653589793;
-
 attribute vec4 a_pos_offset;
 attribute vec4 a_data;
 attribute vec4 a_pixeloffset;
@@ -54,7 +52,9 @@ void main() {
         size = u_size;
     }
 
-    vec4 projectedPoint = u_matrix * vec4(a_pos, 0, 1);
+    float h = elevation(a_pos);
+    vec4 projectedPoint = u_matrix * vec4(a_pos, h, 1);
+
     highp float camera_to_anchor_distance = projectedPoint.w;
     // See comments in symbol_sdf.vertex
     highp float distance_ratio = u_pitch_with_map ?
@@ -63,7 +63,7 @@ void main() {
     highp float perspective_ratio = clamp(
             0.5 + 0.5 * distance_ratio,
             0.0, // Prevents oversized near-field symbols in pitched/overzoomed tiles
-            4.0);
+            1.5);
 
     size *= perspective_ratio;
 
@@ -72,7 +72,7 @@ void main() {
     highp float symbol_rotation = 0.0;
     if (u_rotate_symbol) {
         // See comments in symbol_sdf.vertex
-        vec4 offsetProjectedPoint = u_matrix * vec4(a_pos + vec2(1, 0), 0, 1);
+        vec4 offsetProjectedPoint = u_matrix * vec4(a_pos + vec2(1, 0), h, 1);
 
         vec2 a = projectedPoint.xy / projectedPoint.w;
         vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -84,11 +84,19 @@ void main() {
     highp float angle_cos = cos(segment_angle + symbol_rotation);
     mat2 rotation_matrix = mat2(angle_cos, -1.0 * angle_sin, angle_sin, angle_cos);
 
-    vec4 projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy, 0.0, 1.0);
-    gl_Position = u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * (a_offset / 32.0 * max(a_minFontScale, fontScale) + a_pxoffset / 16.0), 0.0, 1.0);
+    vec4 projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy, h, 1.0);
+    float z = 0.0;
+    vec2 offset = rotation_matrix * (a_offset / 32.0 * max(a_minFontScale, fontScale) + a_pxoffset / 16.0);
+#ifdef PITCH_WITH_MAP_TERRAIN
+    vec4 tile_pos = u_label_plane_matrix_inv * vec4(a_projected_pos.xy + offset, 0.0, 1.0);
+    z = elevation(tile_pos.xy);
+#endif
+    // Symbols might end up being behind the camera. Move them AWAY.
+    float occlusion_fade = occlusionFade(projectedPoint);
+    gl_Position = mix(u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + offset, z, 1.0), AWAY, float(projectedPoint.w <= 0.0 || occlusion_fade == 0.0));
 
     v_tex = a_tex / u_texsize;
     vec2 fade_opacity = unpack_opacity(a_fade_opacity);
     float fade_change = fade_opacity[1] > 0.5 ? u_fade_change : -u_fade_change;
-    v_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
+    v_fade_opacity = max(0.0, min(occlusion_fade, fade_opacity[0] + fade_change));
 }

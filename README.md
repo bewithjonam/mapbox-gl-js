@@ -13,6 +13,13 @@ Fork Version | Mapbox version | Notes
 0.0.10       | 0.48.0         | Merged version 0.48.0 (latest version while working on this merge). Along with extra features/bug fixes, they implemented support for getChildren/getLeaves in geojson source. We got of our implementation of the same from geojsonSource/geojsonWorkerSource but mimiced mapbox's implementation in vectorTileSource/VectorTileWorkerSource. (We worked on unifinished branches/changes in between, so some version numbers have been skipped.) In this version, the getLeaves method parameters have changed for geojsonSource and vectorTileSource.
 0.0.11       | 0.54.1         | Merged version 0.51.1 (latest version while working on this merge). We got rid of custom aggregation/groupBy that we had for clustering and reused `clusterProperties` introduced in the recent versions. (`clusterProperties` will work for vector sources `geojsonTile` is `true` and `cluster` is `true`). Change `getClusterLeaves` to `getLeaves` in vector source, to match the function name in the geojson source implemented by mapbox team.
 0.0.12       | 1.10.1         | Merged version 1.10.1 |
+2.0.0        | 2.0.0          | Merged version 2.0.0  |
+
+## To Test:
+- `yarn install`:
+- `yarn build-prod-min`
+- Open the `fork_examples/geojson**.html` in your browser and check
+
 
 ## Fork Modifications:
  * **Get Pins in Cluster**: ~~Expose getLeaves in superCluster via an interface, so that we can get the pins in a cluster and spiderfy them. Same has been added for vectortile source with geojson endpoints and clustering.~~ (It has been implemented by mapbox and has been merged in fork version 0.0.10. But in vector tile source, we have implemented a simillar version of mapbox's getLeaves but for vector tile sources.)
@@ -58,13 +65,16 @@ native SDKs. For code and issues specific to the native SDKs, see the
 - [Examples](https://docs.mapbox.com/mapbox-gl-js/examples/)
 - [Style documentation](https://docs.mapbox.com/mapbox-gl-js/style-spec/)
 - [Open source styles](https://github.com/mapbox/mapbox-gl-styles)
-- [Contributor documentation](https://github.com/mapbox/mapbox-gl-js/blob/master/CONTRIBUTING.md)
+- [Contributor documentation](./CONTRIBUTING.md)
 
 [<img width="981" alt="Mapbox GL gallery" src="https://raw.githubusercontent.com/mapbox/mapbox-gl-js-docs/publisher-production/docs/pages/assets/gallery.png">](https://www.mapbox.com/gallery/)
 
 ## License
 
-Mapbox GL JS is licensed under the [3-Clause BSD license](https://github.com/mapbox/mapbox-gl-js/blob/master/LICENSE.txt).
-The licenses of its dependencies are tracked via [FOSSA](https://app.fossa.io/projects/git%2Bhttps%3A%2F%2Fgithub.com%2Fmapbox%2Fmapbox-gl-js):
+Copyright © 2020 Mapbox
 
-[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bhttps%3A%2F%2Fgithub.com%2Fmapbox%2Fmapbox-gl-js.svg?type=large)](https://app.fossa.io/projects/git%2Bhttps%3A%2F%2Fgithub.com%2Fmapbox%2Fmapbox-gl-js?ref=badge_large)
+All rights reserved.
+
+Mapbox gl-js version 2.0 or higher (“Mapbox Web SDK”) must be used according to the Mapbox Terms of Service. This license allows developers with a current active Mapbox account to use and modify the Mapbox Web SDK. Developers may modify the Mapbox Web SDK code so long as the modifications do not change or interfere with marked portions of the code related to billing, accounting, and anonymized data collection. The Mapbox Web SDK only sends anonymized usage data, which Mapbox uses for fixing bugs and errors, accounting, and generating aggregated anonymized statistics. This license terminates automatically if a user no longer has an active Mapbox account.
+
+For the full license terms, please see the [Mapbox Terms of Service](https://www.mapbox.com/legal/tos/).

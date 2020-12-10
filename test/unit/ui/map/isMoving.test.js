@@ -7,8 +7,12 @@ import simulate from '../../../util/simulate_interaction';
 
 function createMap(t) {
     t.stub(Map.prototype, '_detectMissingCSS');
+    t.stub(Map.prototype, '_authenticate');
     return new Map({container: DOM.create('div', '', window.document.body)});
 }
+
+// MouseEvent.buttons
+const buttons = 1;
 
 test('Map#isMoving returns false by default', (t) => {
     const map = createMap(t);
@@ -55,7 +59,7 @@ test('Map#isMoving returns true when drag panning', (t) => {
     simulate.mousedown(map.getCanvas());
     map._renderTaskQueue.run();
 
-    simulate.mousemove(map.getCanvas(), {clientX: 10, clientY: 10});
+    simulate.mousemove(map.getCanvas(), {buttons, clientX: 10, clientY: 10});
     map._renderTaskQueue.run();
 
     simulate.mouseup(map.getCanvas());
@@ -151,7 +155,7 @@ test('Map#isMoving returns true when drag panning and scroll zooming interleave'
     simulate.mousedown(map.getCanvas());
     map._renderTaskQueue.run();
 
-    simulate.mousemove(map.getCanvas(), {clientX: 10, clientY: 10});
+    simulate.mousemove(map.getCanvas(), {buttons, clientX: 10, clientY: 10});
     map._renderTaskQueue.run();
 
     const browserNow = t.stub(browser, 'now');

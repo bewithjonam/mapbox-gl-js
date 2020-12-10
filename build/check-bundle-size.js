@@ -1,28 +1,12 @@
 #!/usr/bin/env node
 
 /* eslint-disable */
-
-const jwt = require('jsonwebtoken');
-const github = require('@octokit/rest')();
+const { Octokit } = require("@octokit/rest");
+const { createAppAuth } = require("@octokit/auth-app");
 const prettyBytes = require('pretty-bytes');
 const fs = require('fs');
 const {execSync} = require('child_process');
 const zlib = require('zlib');
-
-const SIZE_CHECK_APP_ID = 14028;
-const SIZE_CHECK_APP_INSTALLATION_ID = 229425;
-
-const file = process.argv[2];
-const label = process.argv[3];
-const name = `Size - ${label}`;
-
-if (!file || !label) {
-    console.log(`Usage: ${process.argv[0]} ${process.argv[1]} FILE LABEL`);
-    process.exit(1);
-}
-
-const {size} = fs.statSync(file);
-const gzipSize = zlib.gzipSync(fs.readFileSync(file)).length;
 
 process.on('unhandledRejection', error => {
     // don't log `error` directly, because errors from child_process.execSync
@@ -31,74 +15,83 @@ process.on('unhandledRejection', error => {
     process.exit(1)
 });
 
-const pk = process.env['SIZE_CHECK_APP_PRIVATE_KEY'];
-if (!pk) {
+const SIZE_CHECK_APP_ID = 14028;
+const SIZE_CHECK_APP_INSTALLATION_ID = 229425;
+
+const FILES = [
+    ['JS', "dist/mapbox-gl.js"],
+    ['CSS', "dist/mapbox-gl.css"]
+];
+const PK = Buffer.from(process.env['SIZE_CHECK_APP_PRIVATE_KEY'], 'base64').toString('binary');
+if (!PK) {
     console.log('Fork PR; not computing size.');
     process.exit(0);
 }
+const owner = 'mapbox';
+const repo = 'mapbox-gl-js';
 
-const key = Buffer.from(pk, 'base64').toString('binary');
-const payload = {
-    exp: Math.floor(Date.now() / 1000) + 60,
-    iat: Math.floor(Date.now() / 1000),
-    iss: SIZE_CHECK_APP_ID
-};
-
-const token = jwt.sign(payload, key, {algorithm: 'RS256'});
-github.authenticate({type: 'app', token});
-
-function getMergeBase() {
-    const pr = process.env['CIRCLE_PULL_REQUEST'];
-    if (pr) {
-        const number = +pr.match(/\/(\d+)\/?$/)[1];
-        return github.pullRequests.get({
-            owner: 'mapbox',
-            repo: 'mapbox-gl-js',
-            pull_number: number
-        }).then(({data}) => {
-            const base = data.base.ref;
-            const head = process.env['CIRCLE_SHA1'];
-            return execSync(`git merge-base origin/${base} ${head}`).toString().trim();
-        });
-    } else {
-        // Walk backward through the history (maximum of 10 commits) until
-        // finding a commit on either master or release-*; assume that's the
-        // base branch.
-        const head = process.env['CIRCLE_SHA1'];
-        for (const sha of execSync(`git rev-list --max-count=10 ${head}`).toString().trim().split('\n')) {
-            const base = execSync(`git branch -r --contains ${sha} origin/master origin/release-* origin/publisher-production`).toString().split('\n')[0].trim().replace(/^origin\//, '');
-            if (base) {
-                return Promise.resolve(execSync(`git merge-base origin/${base} ${head}`).toString().trim());
-            }
+(async () => {
+    // Initialize github client
+    const github = new Octokit({
+        authStrategy: createAppAuth,
+        auth: {
+            id: SIZE_CHECK_APP_ID,
+            privateKey: PK,
+            installationId: SIZE_CHECK_APP_INSTALLATION_ID
         }
-    }
-
-    return Promise.resolve(null);
-}
-
-function getPriorSize(mergeBase) {
-    if (!mergeBase) {
-        console.log('No merge base available.');
-        return Promise.resolve(null);
-    }
-
-    return github.checks.listForRef({
-        owner: 'mapbox',
-        repo: 'mapbox-gl-js',
-        ref: mergeBase
-    }).then(({data}) => {
-        const run = data.check_runs.find(run => run.name === name);
-        if (run) {
-            const match = run.output.summary.match(/`[^`]+` is (\d+) bytes \([^\)]+\) uncompressed, (\d+) bytes \([^\)]+\) gzipped\./);
-            if (match) {
-                const prior = { size: +match[1], gzipSize: +match[2] };
-                console.log(`Prior size was ${prettyBytes(prior.size)}, gzipped ${prior.gzipSize}.`);
-                return prior;
-            }
-        }
-        console.log('No matching check found.');
-        return Promise.resolve(null);
     });
+
+    //get current sizes
+    const currentSizes = FILES.map(([label, filePath]) => [label, getSize(filePath)]);
+    console.log(currentSizes);
+    // Why we need to add GitHub's public key to known_hosts:
+    // https://circleci.com/docs/2.0/gh-bb-integration/#establishing-the-authenticity-of-an-ssh-host
+    execSync(`mkdir -p ~/.ssh`);
+    execSync(`echo 'github.com ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAq2A7hRGmdnm9tUDbO9IDSwBK6TbQa+PXYPCPy6rbTrTtw7PHkccKrpp0yVhp5HdEIcKr6pLlVDBfOLX9QUsyCOV0wzfjIJNlGEYsdlLJizHhbn2mUjvSAHQqZETYP81eFzLQNnPHt4EVVUh7VfDESU84KezmD5QlWpXLmvU31/yMf+Se8xhHTvKSCZIFImWwoG6mbUoWf9nzpIoaSjB+weqqUUmpaaasXVal72J+UX2B+2RPW3RcT0eOzQgqlJL3RKrTJvdsjE3JEAvGq3lGHSZXy28G3skua2SmVi/w4yCE6gbODqnTWlg7+wC604ydGXA8VJiS5ap43JXiUFFAaQ==
+    bitbucket.org ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAubiN81eDcafrgMeLzaFPsw2kNvEcqTKl/VqLat/MaB33pZy0y3rJZtnqwR2qOOvbwKZYKiEO1O6VqNEBxKvJJelCq0dTXWT5pbO2gDXC6h6QDXCaHo6pOHGPUy+YBaGQRGuSusMEASYiWunYN0vCAI8QaXnWMXNMdFP3jHAJH0eDsoiGnLPBlBp4TNm6rYI74nMzgz3B9IikW4WVK+dc8KZJZWYjAuORU3jc1c/NPskD2ASinf8v3xnfXeukU0sJ5N6m5E8VLjObPEO+mN2t/FZTMZLiFqPWc/ALSqnMnnhwrNi2rbfg/rd/IpL8Le3pSBne8+seeFVBoGqzHM9yXw==
+    ' >> ~/.ssh/known_hosts`);
+    execSync(`git reset --hard && git checkout origin/main`);
+    execSync('yarn install');
+    execSync('yarn run build-prod-min');
+    const priorSizes = FILES.map(([label, filePath]) => [label, getSize(filePath)]);
+    console.log(priorSizes);
+
+    // Generate a github check for each filetype
+    for(let check_idx=0; check_idx<FILES.length; check_idx++){
+        const [label, file] = FILES[check_idx];
+        const name = `Size - ${label}`;
+        const size = currentSizes[check_idx][1];
+        const priorSize = priorSizes[check_idx][1];
+
+        const title = `${formatSize(size.size, priorSize.size)}, gzipped ${formatSize(size.gzipSize, priorSize.gzipSize)}`;
+
+        const megabit = Math.pow(2, 12);
+        const downloadTime3G = (size.gzipSize / (3 * megabit)).toFixed(0);
+        const downloadTime4G = (size.gzipSize / (10 * megabit)).toFixed(0);
+        const summary = `\`${file}\` is ${size.size} bytes (${prettyBytes(size.size)}) uncompressed, ${size.gzipSize} bytes (${prettyBytes(size.gzipSize)}) gzipped.
+        That's **${downloadTime3G} seconds** over slow 3G (3 Mbps), **${downloadTime4G} seconds** over fast 4G (10 Mbps).`;
+        console.log('Posting check to GitHub');
+        console.log(`Title: ${title}`);
+        console.log(`Summary: ${summary}`);
+
+        await github.checks.create({
+            owner,
+            repo,
+            name,
+            head_branch: process.env['CIRCLE_BRANCH'],
+            head_sha: process.env['CIRCLE_SHA1'],
+            status: 'completed',
+            conclusion: 'success',
+            completed_at: new Date().toISOString(),
+            output: { title, summary }
+        });
+    }
+})();
+
+function getSize(filePath) {
+    const {size} = fs.statSync(filePath);
+    const gzipSize = zlib.gzipSync(fs.readFileSync(filePath)).length;
+    return {size, gzipSize};
 }
 
 function formatSize(size, priorSize) {
@@ -110,31 +103,3 @@ function formatSize(size, priorSize) {
         return prettyBytes(size);
     }
 }
-
-github.apps.createInstallationToken({installation_id: SIZE_CHECK_APP_INSTALLATION_ID})
-    .then(({data}) => {
-        github.authenticate({type: 'token', token: data.token});
-        getMergeBase().then(getPriorSize).then(prior => {
-            const title = `${formatSize(size, prior ? prior.size : null)}, gzipped ${formatSize(gzipSize, prior ? prior.gzipSize : null)}`;
-
-            const megabit = Math.pow(2, 12);
-            const downloadTime3G = (gzipSize / (3 * megabit)).toFixed(0);
-            const downloadTime4G = (gzipSize / (10 * megabit)).toFixed(0);
-            const summary = `\`${file}\` is ${size} bytes (${prettyBytes(size)}) uncompressed, ${gzipSize} bytes (${prettyBytes(gzipSize)}) gzipped.
-That's **${downloadTime3G} seconds** over slow 3G (3 Mbps), **${downloadTime4G} seconds** over fast 4G (10 Mbps).`;
-
-            console.log(`Posting check result:\n${title}\n${summary}`);
-
-            return github.checks.create({
-                owner: 'mapbox',
-                repo: 'mapbox-gl-js',
-                name,
-                head_branch: process.env['CIRCLE_BRANCH'],
-                head_sha: process.env['CIRCLE_SHA1'],
-                status: 'completed',
-                conclusion: 'success',
-                completed_at: new Date().toISOString(),
-                output: { title, summary }
-            });
-        })
-    });

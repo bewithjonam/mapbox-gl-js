@@ -116,12 +116,13 @@ export default class TileParser {
     parseTile(tile: {tileID: OverscaledTileID, buffer: ArrayBuffer}, returnDependencies?: boolean): Promise<?WorkerTileResult> {
         const workerTile = new WorkerTile({
             tileID: tile.tileID,
+            tileZoom: tile.tileID.overscaledZ,
             zoom: tile.tileID.overscaledZ,
             tileSize: 512,
             overscaling: 1,
             showCollisionBoxes: false,
             source: this.sourceID,
-            uid: '0',
+            uid: 0,
             maxZoom: 22,
             pixelRatio: 1,
             request: {url: ''},
@@ -130,7 +131,8 @@ export default class TileParser {
             cameraToCenterDistance: 0,
             cameraToTileDistance: 0,
             returnDependencies,
-            promoteId: undefined
+            promoteId: undefined,
+            isSymbolTile: false
         });
 
         const vectorTile = new VT.VectorTile(new Protobuf(tile.buffer));
