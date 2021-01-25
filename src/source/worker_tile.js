@@ -15,6 +15,7 @@ import ImageAtlas from '../render/image_atlas';
 import GlyphAtlas from '../render/glyph_atlas';
 import EvaluationParameters from '../style/evaluation_parameters';
 import {OverscaledTileID} from './tile_id';
+import {PerformanceUtils} from '../util/performance';
 
 import type {Bucket} from '../data/bucket';
 import type Actor from '../util/actor';
@@ -30,8 +31,9 @@ import type {PromoteIdSpecification} from '../style-spec/types';
 
 class WorkerTile {
     tileID: OverscaledTileID;
-    uid: string;
+    uid: number;
     zoom: number;
+    tileZoom: number;
     pixelRatio: number;
     tileSize: number;
     source: string;
@@ -40,6 +42,8 @@ class WorkerTile {
     showCollisionBoxes: boolean;
     collectResourceTiming: boolean;
     returnDependencies: boolean;
+    enableTerrain: boolean;
+    isSymbolTile: ?boolean;
 
     status: 'parsing' | 'done';
     data: VectorTile;
@@ -51,6 +55,7 @@ class WorkerTile {
 
     constructor(params: WorkerTileParameters) {
         this.tileID = new OverscaledTileID(params.tileID.overscaledZ, params.tileID.wrap, params.tileID.canonical.z, params.tileID.canonical.x, params.tileID.canonical.y);
+        this.tileZoom = params.tileZoom;
         this.uid = params.uid;
         this.zoom = params.zoom;
         this.pixelRatio = params.pixelRatio;
@@ -61,9 +66,12 @@ class WorkerTile {
         this.collectResourceTiming = !!params.collectResourceTiming;
         this.returnDependencies = !!params.returnDependencies;
         this.promoteId = params.promoteId;
+        this.enableTerrain = !!params.enableTerrain;
+        this.isSymbolTile = params.isSymbolTile;
     }
 
     parse(data: VectorTile, layerIndex: StyleLayerIndex, availableImages: Array<string>, actor: Actor, callback: WorkerTileCallback) {
+        const m = PerformanceUtils.beginMeasure('parseTile1');
         this.status = 'parsing';
         this.data = data;
 
@@ -90,6 +98,22 @@ class WorkerTile {
                 continue;
             }
 
+            let anySymbolLayers = false;
+            let anyOtherLayers = false;
+            for (const family of layerFamilies[sourceLayerId]) {
+                if (family[0].type === 'symbol') {
+                    anySymbolLayers = true;
+                } else {
+                    anyOtherLayers = true;
+                }
+            }
+
+            if (this.isSymbolTile === true && !anySymbolLayers) {
+                continue;
+            } else if (this.isSymbolTile === false && !anyOtherLayers) {
+                continue;
+            }
+
             if (sourceLayer.version === 1) {
                 warnOnce(`Vector tile source "${this.source}" layer "${sourceLayerId}" ` +
                     `does not use vector tile spec v2 and therefore may have some rendering errors.`);
@@ -105,6 +129,7 @@ class WorkerTile {
 
             for (const family of layerFamilies[sourceLayerId]) {
                 const layer = family[0];
+                if (this.isSymbolTile !== undefined && (layer.type === 'symbol') !== this.isSymbolTile) continue;
 
                 assert(layer.source === this.source);
                 if (layer.minzoom && this.zoom < Math.floor(layer.minzoom)) continue;
@@ -121,7 +146,8 @@ class WorkerTile {
                     overscaling: this.overscaling,
                     collisionBoxArray: this.collisionBoxArray,
                     sourceLayerIndex,
-                    sourceID: this.source
+                    sourceID: this.source,
+                    enableTerrain: this.enableTerrain
                 });
 
                 bucket.populate(features, options, this.tileID.canonical);
@@ -133,6 +159,7 @@ class WorkerTile {
         let glyphMap: ?{[_: string]: {[_: number]: ?StyleGlyph}};
         let iconMap: ?{[_: string]: StyleImage};
         let patternMap: ?{[_: string]: StyleImage};
+        const taskMetadata = {type: 'maybePrepare', isSymbolTile: this.isSymbolTile, zoom: this.zoom};
 
         const stacks = mapObject(options.glyphDependencies, (glyphs) => Object.keys(glyphs).map(Number));
         if (Object.keys(stacks).length) {
@@ -142,7 +169,7 @@ class WorkerTile {
                     glyphMap = result;
                     maybePrepare.call(this);
                 }
-            });
+            }, undefined, undefined, taskMetadata);
         } else {
             glyphMap = {};
         }
@@ -155,7 +182,7 @@ class WorkerTile {
                     iconMap = result;
                     maybePrepare.call(this);
                 }
-            });
+            }, undefined, undefined, taskMetadata);
         } else {
             iconMap = {};
         }
@@ -168,10 +195,12 @@ class WorkerTile {
                     patternMap = result;
                     maybePrepare.call(this);
                 }
-            });
+            }, undefined, undefined, taskMetadata);
         } else {
             patternMap = {};
         }
+
+        PerformanceUtils.endMeasure(m);
 
         maybePrepare.call(this);
 
@@ -179,6 +208,7 @@ class WorkerTile {
             if (error) {
                 return callback(error);
             } else if (glyphMap && iconMap && patternMap) {
+                const m = PerformanceUtils.beginMeasure('parseTile2');
                 const glyphAtlas = new GlyphAtlas(glyphMap);
                 const imageAtlas = new ImageAtlas(iconMap, patternMap);
 
@@ -186,7 +216,14 @@ class WorkerTile {
                     const bucket = buckets[key];
                     if (bucket instanceof SymbolBucket) {
                         recalculateLayers(bucket.layers, this.zoom, availableImages);
-                        performSymbolLayout(bucket, glyphMap, glyphAtlas.positions, iconMap, imageAtlas.iconPositions, this.showCollisionBoxes, this.tileID.canonical);
+                        performSymbolLayout(bucket,
+                            glyphMap,
+                            glyphAtlas.positions,
+                            iconMap,
+                            imageAtlas.iconPositions,
+                            this.showCollisionBoxes,
+                            this.tileID.canonical,
+                            this.tileZoom);
                     } else if (bucket.hasPattern &&
                         (bucket instanceof LineBucket ||
                          bucket instanceof FillBucket ||
@@ -208,6 +245,7 @@ class WorkerTile {
                     iconMap: this.returnDependencies ? iconMap : null,
                     glyphPositions: this.returnDependencies ? glyphAtlas.positions : null
                 });
+                PerformanceUtils.endMeasure(m);
             }
         }
     }

@@ -17,12 +17,18 @@ const {ImageBitmap} = window;
 
 export type TileParameters = {
     source: string,
-    uid: string,
+    uid: number,
 };
 
-export type WorkerTileParameters = TileParameters & {
+export type RequestedTileParameters = TileParameters & {
     tileID: OverscaledTileID,
+    tileZoom: number,
     request: RequestParameters,
+    data?: mixed,
+    isSymbolTile: ?boolean
+};
+
+export type WorkerTileParameters = RequestedTileParameters & {
     zoom: number,
     maxZoom: number,
     tileSize: number,
@@ -30,13 +36,16 @@ export type WorkerTileParameters = TileParameters & {
     pixelRatio: number,
     showCollisionBoxes: boolean,
     collectResourceTiming?: boolean,
-    returnDependencies?: boolean
+    returnDependencies?: boolean,
+    enableTerrain?: boolean
 };
 
 export type WorkerDEMTileParameters = TileParameters & {
     coord: { z: number, x: number, y: number, w: number },
     rawImageData: RGBAImage | ImageBitmap,
-    encoding: "mapbox" | "terrarium"
+    encoding: "mapbox" | "terrarium",
+    padding: number,
+    buildQuadTree?: boolean
 };
 
 export type WorkerTileResult = {

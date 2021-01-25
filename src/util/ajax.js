@@ -79,10 +79,6 @@ class AJAXError extends Error {
         super(message);
         this.status = status;
         this.url = url;
-
-        // work around for https://github.com/Rich-Harris/buble/issues/40
-        this.name = this.constructor.name;
-        this.message = message;
     }
 
     toString() {
@@ -236,10 +232,9 @@ function makeXMLHttpRequest(requestParameters: RequestParameters, callback: Resp
 
 export const makeRequest = function(requestParameters: RequestParameters, callback: ResponseCallback<any>): Cancelable {
     // We're trying to use the Fetch API if possible. However, in some situations we can't use it:
-    // - IE11 doesn't support it at all. In this case, we dispatch the request to the main thread so
-    //   that we can get an accruate referrer header.
     // - Safari exposes window.AbortController, but it doesn't work actually abort any requests in
-    //   some versions (see https://bugs.webkit.org/show_bug.cgi?id=174980#c2)
+    //   older versions (see https://bugs.webkit.org/show_bug.cgi?id=174980#c2). In this case,
+    //   we dispatch the request to the main thread so that we can get an accruate referrer header.
     // - Requests for resources with the file:// URI scheme don't work with the Fetch API either. In
     //   this case we unconditionally use XHR on the current thread since referrers don't matter.
     if (!isFileURL(requestParameters.url)) {
@@ -266,6 +261,10 @@ export const postData = function(requestParameters: RequestParameters, callback:
     return makeRequest(extend(requestParameters, {method: 'POST'}), callback);
 };
 
+export const getData = function(requestParameters: RequestParameters, callback: ResponseCallback<string>): Cancelable {
+    return makeRequest(extend(requestParameters, {method: 'GET'}), callback);
+};
+
 function sameOrigin(url) {
     const a: HTMLAnchorElement = window.document.createElement('a');
     a.href = url;
@@ -280,6 +279,9 @@ function arrayBufferToImage(data: ArrayBuffer, callback: (err: ?Error, image: ?H
     img.onload = () => {
         callback(null, img);
         URL.revokeObjectURL(img.src);
+        // prevent image dataURI memory leak in Safari
+        img.onload = null;
+        img.src = transparentPngUrl;
     };
     img.onerror = () => callback(new Error('Could not load image. Please make sure to use a supported image type such as PNG or JPEG. Note that SVGs are not supported.'));
     const blob: Blob = new window.Blob([new Uint8Array(data)], {type: 'image/png'});

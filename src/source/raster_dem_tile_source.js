@@ -1,7 +1,7 @@
 // @flow
 
 import {getImage, ResourceType} from '../util/ajax';
-import {extend} from '../util/util';
+import {extend, prevPowerOfTwo} from '../util/util';
 import {Evented} from '../util/evented';
 import browser from '../util/browser';
 import window from '../util/window';
@@ -40,10 +40,9 @@ class RasterDEMTileSource extends RasterTileSource implements Source {
     }
 
     loadTile(tile: Tile, callback: Callback<void>) {
-        const url = this.map._requestManager.normalizeTileURL(tile.tileID.canonical.url(this.tiles, this.scheme), this.tileSize);
+        const url = this.map._requestManager.normalizeTileURL(tile.tileID.canonical.url(this.tiles, this.scheme), false, this.tileSize);
         tile.request = getImage(this.map._requestManager.transformRequest(url, ResourceType.Tile), imageLoaded.bind(this));
 
-        tile.neighboringTiles = this._getNeighboringTiles(tile.tileID);
         function imageLoaded(err, img) {
             delete tile.request;
             if (tile.aborted) {
@@ -57,13 +56,23 @@ class RasterDEMTileSource extends RasterTileSource implements Source {
                 delete (img: any).cacheControl;
                 delete (img: any).expires;
                 const transfer = window.ImageBitmap && img instanceof window.ImageBitmap && offscreenCanvasSupported();
-                const rawImageData = transfer ? img : browser.getImageData(img, 1);
+                // DEMData uses 1px padding. Handle cases with image buffer of 1 and 2 pxs, the rest assume default buffer 0
+                // in order to keep the previous implementation working (no validation against tileSize).
+                const buffer = (img.width - prevPowerOfTwo(img.width)) / 2;
+                // padding is used in getImageData. As DEMData has 1px padding, if DEM tile buffer is 2px, discard outermost pixels.
+                const padding = 1 - buffer;
+                const borderReady = padding < 1;
+                if (!borderReady && !tile.neighboringTiles) {
+                    tile.neighboringTiles = this._getNeighboringTiles(tile.tileID);
+                }
+                const rawImageData = transfer ? img : browser.getImageData(img, padding);
                 const params = {
                     uid: tile.uid,
                     coord: tile.tileID,
                     source: this.id,
                     rawImageData,
-                    encoding: this.encoding
+                    encoding: this.encoding,
+                    padding
                 };
 
                 if (!tile.actor || tile.state === 'expired') {
@@ -81,7 +90,9 @@ class RasterDEMTileSource extends RasterTileSource implements Source {
 
             if (dem) {
                 tile.dem = dem;
+                tile.dem.onDeserialize();
                 tile.needsHillshadePrepare = true;
+                tile.needsDEMTextureUpload = true;
                 tile.state = 'loaded';
                 callback(null);
             }
@@ -128,9 +139,6 @@ class RasterDEMTileSource extends RasterTileSource implements Source {
         delete tile.neighboringTiles;
 
         tile.state = 'unloaded';
-        if (tile.actor) {
-            tile.actor.send('removeDEMTile', {uid: tile.uid, source: this.id});
-        }
     }
 
 }

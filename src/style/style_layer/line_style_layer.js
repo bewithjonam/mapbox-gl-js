@@ -4,21 +4,21 @@ import Point from '@mapbox/point-geometry';
 
 import StyleLayer from '../style_layer';
 import LineBucket from '../../data/bucket/line_bucket';
-import {RGBAImage} from '../../util/image';
 import {polygonIntersectsBufferedMultiLine} from '../../util/intersection_tests';
 import {getMaximumPaintValue, translateDistance, translate} from '../query_utils';
 import properties from './line_style_layer_properties';
-import {extend} from '../../util/util';
+import {extend, MAX_SAFE_INTEGER} from '../../util/util';
 import EvaluationParameters from '../evaluation_parameters';
-import renderColorRamp from '../../util/color_ramp';
 import {Transitionable, Transitioning, Layout, PossiblyEvaluated, DataDrivenProperty} from '../properties';
+import ProgramConfiguration from '../../data/program_configuration';
 
-import type {FeatureState} from '../../style-spec/expression';
+import Step from '../../style-spec/expression/definitions/step';
+import type {FeatureState, ZoomConstantExpression} from '../../style-spec/expression';
 import type {Bucket, BucketParameters} from '../../data/bucket';
 import type {LayoutProps, PaintProps} from './line_style_layer_properties';
 import type Transform from '../../geo/transform';
-import type Texture from '../../render/texture';
 import type {LayerSpecification} from '../../style-spec/types';
+import type {TilespaceQueryGeometry} from '../query_geometry';
 
 class LineFloorwidthProperty extends DataDrivenProperty<number> {
     useIntegerZoom: true;
@@ -46,8 +46,8 @@ class LineStyleLayer extends StyleLayer {
     _unevaluatedLayout: Layout<LayoutProps>;
     layout: PossiblyEvaluated<LayoutProps>;
 
-    gradient: ?RGBAImage;
-    gradientTexture: ?Texture;
+    gradientVersion: number;
+    stepInterpolant: boolean;
 
     _transitionablePaint: Transitionable<PaintProps>;
     _transitioningPaint: Transitioning<PaintProps>;
@@ -55,18 +55,19 @@ class LineStyleLayer extends StyleLayer {
 
     constructor(layer: LayerSpecification) {
         super(layer, properties);
+        this.gradientVersion = 0;
     }
 
     _handleSpecialPaintPropertyUpdate(name: string) {
         if (name === 'line-gradient') {
-            this._updateGradient();
+            const expression: ZoomConstantExpression<'source'> = ((this._transitionablePaint._values['line-gradient'].value.expression): any);
+            this.stepInterpolant = expression._styleExpression.expression instanceof Step;
+            this.gradientVersion = (this.gradientVersion + 1) % MAX_SAFE_INTEGER;
         }
     }
 
-    _updateGradient() {
-        const expression = this._transitionablePaint._values['line-gradient'].value.expression;
-        this.gradient = renderColorRamp(expression, 'lineProgress');
-        this.gradientTexture = null;
+    gradientExpression() {
+        return this._transitionablePaint._values['line-gradient'].value.expression;
     }
 
     recalculate(parameters: EvaluationParameters, availableImages: Array<string>) {
@@ -80,6 +81,22 @@ class LineStyleLayer extends StyleLayer {
         return new LineBucket(parameters);
     }
 
+    getProgramIds(): string[] {
+        const dasharray = this.paint.get('line-dasharray');
+        const patternProperty = this.paint.get('line-pattern');
+        const image = patternProperty.constantOr((1: any));
+        const gradient = this.paint.get('line-gradient');
+        const programId =
+            image ? 'linePattern' :
+            dasharray ? 'lineSDF' :
+            gradient ? 'lineGradient' : 'line';
+        return [programId];
+    }
+
+    getProgramConfiguration(zoom: number): ProgramConfiguration {
+        return new ProgramConfiguration(this, zoom);
+    }
+
     queryRadius(bucket: Bucket): number {
         const lineBucket: LineBucket = (bucket: any);
         const width = getLineWidth(
@@ -89,23 +106,24 @@ class LineStyleLayer extends StyleLayer {
         return width / 2 + Math.abs(offset) + translateDistance(this.paint.get('line-translate'));
     }
 
-    queryIntersectsFeature(queryGeometry: Array<Point>,
+    queryIntersectsFeature(queryGeometry: TilespaceQueryGeometry,
                            feature: VectorTileFeature,
                            featureState: FeatureState,
                            geometry: Array<Array<Point>>,
                            zoom: number,
-                           transform: Transform,
-                           pixelsToTileUnits: number): boolean {
-        const translatedPolygon = translate(queryGeometry,
+                           transform: Transform): boolean {
+        if (queryGeometry.queryGeometry.isAboveHorizon) return false;
+
+        const translatedPolygon = translate(queryGeometry.tilespaceGeometry,
             this.paint.get('line-translate'),
             this.paint.get('line-translate-anchor'),
-            transform.angle, pixelsToTileUnits);
-        const halfWidth = pixelsToTileUnits / 2 * getLineWidth(
+            transform.angle, queryGeometry.pixelToTileUnitsFactor);
+        const halfWidth = queryGeometry.pixelToTileUnitsFactor / 2 * getLineWidth(
             this.paint.get('line-width').evaluate(feature, featureState),
             this.paint.get('line-gap-width').evaluate(feature, featureState));
         const lineOffset = this.paint.get('line-offset').evaluate(feature, featureState);
         if (lineOffset) {
-            geometry = offsetLine(geometry, lineOffset * pixelsToTileUnits);
+            geometry = offsetLine(geometry, lineOffset * queryGeometry.pixelToTileUnitsFactor);
         }
 
         return polygonIntersectsBufferedMultiLine(translatedPolygon, geometry, halfWidth);

@@ -6,6 +6,7 @@ import type CollisionIndex from '../symbol/collision_index';
 import type Transform from '../geo/transform';
 import type {RetainedQueryData} from '../symbol/placement';
 import type {FilterSpecification} from '../style-spec/types';
+import type {QueryGeometry} from '../style/query_geometry';
 import assert from 'assert';
 import {mat4} from 'gl-matrix';
 
@@ -14,57 +15,34 @@ import {mat4} from 'gl-matrix';
  */
 function getPixelPosMatrix(transform, tileID) {
     const t = mat4.identity([]);
-    mat4.translate(t, t, [1, 1, 0]);
-    mat4.scale(t, t, [transform.width * 0.5, transform.height * 0.5, 1]);
+    mat4.scale(t, t, [transform.width * 0.5, -transform.height * 0.5, 1]);
+    mat4.translate(t, t, [1, -1, 0]);
     return mat4.multiply(t, t, transform.calculatePosMatrix(tileID.toUnwrapped()));
-}
-
-function queryIncludes3DLayer(layers?: Array<string>, styleLayers: {[_: string]: StyleLayer}, sourceID: string) {
-    if (layers) {
-        for (const layerID of layers) {
-            const layer = styleLayers[layerID];
-            if (layer && layer.source === sourceID && layer.type === 'fill-extrusion') {
-                return true;
-            }
-        }
-    } else {
-        for (const key in styleLayers) {
-            const layer = styleLayers[key];
-            if (layer.source === sourceID && layer.type === 'fill-extrusion') {
-                return true;
-            }
-        }
-    }
-    return false;
 }
 
 export function queryRenderedFeatures(sourceCache: SourceCache,
                             styleLayers: {[_: string]: StyleLayer},
                             serializedLayers: {[_: string]: Object},
-                            queryGeometry: Array<Point>,
+                            queryGeometry: QueryGeometry,
                             params: { filter: FilterSpecification, layers: Array<string>, availableImages: Array<string> },
-                            transform: Transform) {
-
-    const has3DLayer = queryIncludes3DLayer(params && params.layers, styleLayers, sourceCache.id);
-    const maxPitchScaleFactor = transform.maxPitchScaleFactor();
-    const tilesIn = sourceCache.tilesIn(queryGeometry, maxPitchScaleFactor, has3DLayer);
-
-    tilesIn.sort(sortTilesIn);
+                            transform: Transform,
+                            use3DQuery: boolean,
+                            visualizeQueryGeometry: boolean = false) {
+    const tileResults = sourceCache.tilesIn(queryGeometry, use3DQuery, visualizeQueryGeometry);
+    tileResults.sort(sortTilesIn);
     const renderedFeatureLayers = [];
-    for (const tileIn of tilesIn) {
+    for (const tileResult of tileResults) {
         renderedFeatureLayers.push({
-            wrappedTileID: tileIn.tileID.wrapped().key,
-            queryResults: tileIn.tile.queryRenderedFeatures(
+            wrappedTileID: tileResult.tile.tileID.wrapped().key,
+            queryResults: tileResult.tile.queryRenderedFeatures(
                 styleLayers,
                 serializedLayers,
                 sourceCache._state,
-                tileIn.queryGeometry,
-                tileIn.cameraQueryGeometry,
-                tileIn.scale,
+                tileResult,
                 params,
                 transform,
-                maxPitchScaleFactor,
-                getPixelPosMatrix(sourceCache.transform, tileIn.tileID))
+                getPixelPosMatrix(sourceCache.transform, tileResult.tile.tileID),
+                visualizeQueryGeometry)
         });
     }
 
@@ -87,7 +65,7 @@ export function queryRenderedFeatures(sourceCache: SourceCache,
 
 export function queryRenderedSymbols(styleLayers: {[_: string]: StyleLayer},
                             serializedLayers: {[_: string]: StyleLayer},
-                            sourceCaches: {[_: string]: SourceCache},
+                            getLayerSourceCache: (layer: StyleLayer) => SourceCache,
                             queryGeometry: Array<Point>,
                             params: { filter: FilterSpecification, layers: Array<string>, availableImages: Array<string> },
                             collisionIndex: CollisionIndex,
@@ -145,7 +123,7 @@ export function queryRenderedSymbols(styleLayers: {[_: string]: StyleLayer},
         result[layerName].forEach((featureWrapper) => {
             const feature = featureWrapper.feature;
             const layer = styleLayers[layerName];
-            const sourceCache = sourceCaches[layer.source];
+            const sourceCache = getLayerSourceCache(layer);
             const state = sourceCache.getFeatureState(feature.layer['source-layer'], feature.id);
             feature.source = feature.layer.source;
             if (feature.layer['source-layer']) {

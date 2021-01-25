@@ -3,6 +3,7 @@
 import Point from '@mapbox/point-geometry';
 
 import loadGeometry from './load_geometry';
+import toEvaluationFeature from './evaluation_feature';
 import EXTENT from './extent';
 import featureFilter from '../style-spec/feature_filter';
 import Grid from 'grid-index';
@@ -10,29 +11,26 @@ import DictionaryCoder from '../util/dictionary_coder';
 import vt from '@mapbox/vector-tile';
 import Protobuf from 'pbf';
 import GeoJSONFeature from '../util/vectortile_to_geojson';
-import {arraysIntersect, mapObject} from '../util/util';
+import {arraysIntersect, mapObject, extend} from '../util/util';
 import {OverscaledTileID} from '../source/tile_id';
 import {register} from '../util/web_worker_transfer';
 import EvaluationParameters from '../style/evaluation_parameters';
 import SourceFeatureState from '../source/source_state';
 import {polygonIntersectsBox} from '../util/intersection_tests';
 import {PossiblyEvaluated} from '../style/properties';
+import {FeatureIndexArray} from './array_types';
+import {DEMSampler} from '../terrain/elevation';
 
 import type StyleLayer from '../style/style_layer';
 import type {FeatureFilter} from '../style-spec/feature_filter';
 import type Transform from '../geo/transform';
 import type {FilterSpecification, PromoteIdSpecification} from '../style-spec/types';
-
-import {FeatureIndexArray} from './array_types';
+import type {TilespaceQueryGeometry} from '../style/query_geometry';
 
 type QueryParameters = {
-    scale: number,
     pixelPosMatrix: Float32Array,
     transform: Transform,
-    tileSize: number,
-    queryGeometry: Array<Point>,
-    cameraQueryGeometry: Array<Point>,
-    queryPadding: number,
+    tileResult: TilespaceQueryGeometry,
     params: {
         filter: FilterSpecification,
         layers: Array<string>,
@@ -46,7 +44,6 @@ class FeatureIndex {
     y: number;
     z: number;
     grid: Grid;
-    grid3D: Grid;
     featureIndexArray: FeatureIndexArray;
     promoteId: ?PromoteIdSpecification;
 
@@ -62,16 +59,15 @@ class FeatureIndex {
         this.y = tileID.canonical.y;
         this.z = tileID.canonical.z;
         this.grid = new Grid(EXTENT, 16, 0);
-        this.grid3D = new Grid(EXTENT, 16, 0);
         this.featureIndexArray = new FeatureIndexArray();
         this.promoteId = promoteId;
     }
 
-    insert(feature: VectorTileFeature, geometry: Array<Array<Point>>, featureIndex: number, sourceLayerIndex: number, bucketIndex: number, is3D?: boolean) {
+    insert(feature: VectorTileFeature, geometry: Array<Array<Point>>, featureIndex: number, sourceLayerIndex: number, bucketIndex: number) {
         const key = this.featureIndexArray.length;
         this.featureIndexArray.emplaceBack(featureIndex, sourceLayerIndex, bucketIndex);
 
-        const grid = is3D ? this.grid3D : this.grid;
+        const grid = this.grid;
 
         for (let r = 0; r < geometry.length; r++) {
             const ring = geometry[r];
@@ -105,29 +101,22 @@ class FeatureIndex {
     // Finds non-symbol features in this tile at a particular position.
     query(args: QueryParameters, styleLayers: {[_: string]: StyleLayer}, serializedLayers: {[_: string]: Object}, sourceFeatureState: SourceFeatureState): {[_: string]: Array<{ featureIndex: number, feature: GeoJSONFeature }>} {
         this.loadVTLayers();
-
         const params = args.params || {},
-            pixelsToTileUnits = EXTENT / args.tileSize / args.scale,
             filter = featureFilter(params.filter);
+        const tilespaceGeometry = args.tileResult;
+        const transform = args.transform;
 
-        const queryGeometry = args.queryGeometry;
-        const queryPadding = args.queryPadding * pixelsToTileUnits;
-
-        const bounds = getBounds(queryGeometry);
-        const matching = this.grid.query(bounds.minX - queryPadding, bounds.minY - queryPadding, bounds.maxX + queryPadding, bounds.maxY + queryPadding);
-
-        const cameraBounds = getBounds(args.cameraQueryGeometry);
-        const matching3D = this.grid3D.query(
-                cameraBounds.minX - queryPadding, cameraBounds.minY - queryPadding, cameraBounds.maxX + queryPadding, cameraBounds.maxY + queryPadding,
-                (bx1, by1, bx2, by2) => {
-                    return polygonIntersectsBox(args.cameraQueryGeometry, bx1 - queryPadding, by1 - queryPadding, bx2 + queryPadding, by2 + queryPadding);
-                });
-
-        for (const key of matching3D) {
-            matching.push(key);
-        }
-
+        const bounds = tilespaceGeometry.bufferedTilespaceBounds;
+        const queryPredicate = (bx1, by1, bx2, by2) => {
+            return polygonIntersectsBox(tilespaceGeometry.bufferedTilespaceGeometry, bx1, by1, bx2, by2);
+        };
+        const matching = this.grid.query(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y, queryPredicate);
         matching.sort(topDownFeatureComparator);
+
+        let elevationHelper = null;
+        if (transform.elevation && matching.length > 0) {
+            elevationHelper = DEMSampler.create(transform.elevation, this.tileID);
+        }
 
         const result = {};
         let previousIndex;
@@ -156,7 +145,7 @@ class FeatureIndex {
                         featureGeometry = loadGeometry(feature);
                     }
 
-                    return styleLayer.queryIntersectsFeature(queryGeometry, feature, featureState, featureGeometry, this.z, args.transform, pixelsToTileUnits, args.pixelPosMatrix);
+                    return styleLayer.queryIntersectsFeature(tilespaceGeometry, feature, featureState, featureGeometry, this.z, args.transform, args.pixelPosMatrix, elevationHelper);
                 }
             );
         }
@@ -185,8 +174,14 @@ class FeatureIndex {
         const sourceLayer = this.vtLayers[sourceLayerName];
         const feature = sourceLayer.feature(featureIndex);
 
-        if (!filter.filter(new EvaluationParameters(this.tileID.overscaledZ), feature))
+        if (filter.needGeometry) {
+            const evaluationFeature = toEvaluationFeature(feature, true);
+            if (!filter.filter(new EvaluationParameters(this.tileID.overscaledZ), evaluationFeature, this.tileID.canonical)) {
+                return;
+            }
+        } else if (!filter.filter(new EvaluationParameters(this.tileID.overscaledZ), feature)) {
             return;
+        }
 
         const id = this.getId(feature, sourceLayerName);
 
@@ -207,7 +202,7 @@ class FeatureIndex {
                 featureState = sourceFeatureState.getState(styleLayer.sourceLayer || '_geojsonTileLayer', id);
             }
 
-            const serializedLayer = serializedLayers[layerID];
+            const serializedLayer = extend({}, serializedLayers[layerID]);
 
             serializedLayer.paint = evaluateProperties(serializedLayer.paint, styleLayer.paint, feature, featureState, availableImages);
             serializedLayer.layout = evaluateProperties(serializedLayer.layout, styleLayer.layout, feature, featureState, availableImages);
@@ -294,20 +289,6 @@ function evaluateProperties(serializedProperties, styleLayerProperties, feature,
         const prop = styleLayerProperties instanceof PossiblyEvaluated ? styleLayerProperties.get(key) : null;
         return prop && prop.evaluate ? prop.evaluate(feature, featureState, availableImages) : prop;
     });
-}
-
-function getBounds(geometry: Array<Point>) {
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const p of geometry) {
-        minX = Math.min(minX, p.x);
-        minY = Math.min(minY, p.y);
-        maxX = Math.max(maxX, p.x);
-        maxY = Math.max(maxY, p.y);
-    }
-    return {minX, minY, maxX, maxY};
 }
 
 function topDownFeatureComparator(a, b) {

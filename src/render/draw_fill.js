@@ -80,6 +80,7 @@ function drawFillTiles(painter, sourceCache, layer, coords, depthMode, colorMode
 
         const bucket: ?FillBucket = (tile.getBucket(layer): any);
         if (!bucket) continue;
+        painter.prepareDrawTile(coord);
 
         const programConfiguration = bucket.programConfigurations.get(layer.id);
         const program = painter.useProgram(programName, programConfiguration);
@@ -110,7 +111,7 @@ function drawFillTiles(painter, sourceCache, layer, coords, depthMode, colorMode
         } else {
             indexBuffer = bucket.indexBuffer2;
             segments = bucket.segments2;
-            const drawingBufferSize = [gl.drawingBufferWidth, gl.drawingBufferHeight];
+            const drawingBufferSize = (painter.terrain && painter.terrain.renderingToTexture) ? painter.terrain.drapeBufferSize : [gl.drawingBufferWidth, gl.drawingBufferHeight];
             uniformValues = (programName === 'fillOutlinePattern' && image) ?
                 fillOutlinePatternUniformValues(tileMatrix, painter, crossfade, tile, drawingBufferSize) :
                 fillOutlineUniformValues(tileMatrix, drawingBufferSize);

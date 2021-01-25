@@ -93,6 +93,8 @@ function createStructArrayLayoutType({members, size, alignment}) {
 
     const key = `${members.map(m => `${m.components}${typeAbbreviations[m.type]}`).join('')}${size}`;
     const className = `StructArrayLayout${key}`;
+    // Layout alignment to 4 bytes boundaries can be an issue on some set of graphics cards. Particularly AMD.
+    if (size % 4 !== 0) { console.warn(`Warning: The layout ${className} is not aligned to 4-bytes boundaries.`); }
     if (!layoutCache[key]) {
         layoutCache[key] = {
             className,
@@ -125,9 +127,11 @@ createStructArrayType('raster_bounds', rasterBoundsAttributes);
 
 const circleAttributes = require('../src/data/bucket/circle_attributes').default;
 const fillAttributes = require('../src/data/bucket/fill_attributes').default;
-const fillExtrusionAttributes = require('../src/data/bucket/fill_extrusion_attributes').default;
 const lineAttributes = require('../src/data/bucket/line_attributes').default;
+const lineAttributesExt = require('../src/data/bucket/line_attributes_ext').default;
 const patternAttributes = require('../src/data/bucket/pattern_attributes').default;
+const skyboxAttributes = require('../src/render/skybox_attributes').default;
+const {fillExtrusionAttributes, centroidAttributes} = require('../src/data/bucket/fill_extrusion_attributes');
 
 // layout vertex arrays
 const layoutAttributes = {
@@ -136,6 +140,7 @@ const layoutAttributes = {
     'fill-extrusion': fillExtrusionAttributes,
     heatmap: circleAttributes,
     line: lineAttributes,
+    lineExt: lineAttributesExt,
     pattern: patternAttributes
 };
 for (const name in layoutAttributes) {
@@ -151,6 +156,7 @@ const {
     collisionBoxLayout,
     collisionCircleLayout,
     collisionVertexAttributes,
+    collisionVertexAttributesExt,
     quadTriangle,
     placement,
     symbolInstance,
@@ -165,6 +171,7 @@ createStructArrayType('collision_box', collisionBox, true);
 createStructArrayType(`collision_box_layout`, collisionBoxLayout);
 createStructArrayType(`collision_circle_layout`, collisionCircleLayout);
 createStructArrayType(`collision_vertex`, collisionVertexAttributes);
+createStructArrayType(`collision_vertex_ext`, collisionVertexAttributesExt);
 createStructArrayType(`quad_triangle`, quadTriangle);
 createStructArrayType('placed_symbol', placement, true);
 createStructArrayType('symbol_instance', symbolInstance, true);
@@ -196,6 +203,9 @@ createStructArrayType('line_strip_index', createLayout([
     { type: 'Uint16', name: 'vertices', components: 1 }
 ]));
 
+// skybox vertex array
+createStructArrayType(`skybox_vertex`, skyboxAttributes);
+
 // paint vertex arrays
 
 // used by SourceBinder for float properties
@@ -218,6 +228,9 @@ createStructArrayLayoutType(createLayout([{
     type: 'Float32',
     components: 4
 }], 4));
+
+// Fill extrusion specific array
+createStructArrayType(`fill_extrusion_centroid`, centroidAttributes);
 
 const layouts = Object.keys(layoutCache).map(k => layoutCache[k]);
 

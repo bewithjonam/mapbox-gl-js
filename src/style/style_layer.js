@@ -12,6 +12,7 @@ import {
 import {Evented} from '../util/evented';
 import {Layout, Transitionable, Transitioning, Properties, PossiblyEvaluated, PossiblyEvaluatedPropertyValue} from './properties';
 import {supportsPropertyExpression} from '../style-spec/util/properties';
+import ProgramConfiguration from '../data/program_configuration';
 
 import type {FeatureState} from '../style-spec/expression';
 import type {Bucket} from '../data/bucket';
@@ -27,6 +28,8 @@ import type {
 import type {CustomLayerInterface} from './style_layer/custom_style_layer';
 import type Map from '../ui/map';
 import type {StyleSetterOptions} from './style';
+import type {TilespaceQueryGeometry} from './query_geometry';
+import type {DEMSampler} from '../terrain/elevation';
 
 const TRANSITION_SUFFIX = '-transition';
 
@@ -52,14 +55,14 @@ class StyleLayer extends Evented {
     _featureFilter: FeatureFilter;
 
     +queryRadius: (bucket: Bucket) => number;
-    +queryIntersectsFeature: (queryGeometry: Array<Point>,
+    +queryIntersectsFeature: (queryGeometry: TilespaceQueryGeometry,
                               feature: VectorTileFeature,
                               featureState: FeatureState,
                               geometry: Array<Array<Point>>,
                               zoom: number,
                               transform: Transform,
-                              pixelsToTileUnits: number,
-                              pixelPosMatrix: Float32Array) => boolean | number;
+                              pixelPosMatrix: Float32Array,
+                              elevationHelper: ?DEMSampler) => boolean | number;
 
     +onAdd: ?(map: Map) => void;
     +onRemove: ?(map: Map) => void;
@@ -79,7 +82,7 @@ class StyleLayer extends Evented {
         this.minzoom = layer.minzoom;
         this.maxzoom = layer.maxzoom;
 
-        if (layer.type !== 'background') {
+        if (layer.type !== 'background' && layer.type !== 'sky') {
             this.source = layer.source;
             this.sourceLayer = layer['source-layer'];
             this.filter = layer.filter;
@@ -175,6 +178,16 @@ class StyleLayer extends Evented {
         // No-op; can be overridden by derived classes.
     }
 
+    getProgramIds(): string[] | null {
+        // No-op; can be overridden by derived classes.
+        return null;
+    }
+
+    getProgramConfiguration(_: number): ProgramConfiguration | null {
+        // No-op; can be overridden by derived classes.
+        return null;
+    }
+
     // eslint-disable-next-line no-unused-vars
     _handleOverridablePaintPropertyUpdate<T, R>(name: string, oldValue: PropertyValue<T, R>, newValue: PropertyValue<T, R>): boolean {
         // No-op; can be overridden by derived classes.
@@ -249,6 +262,10 @@ class StyleLayer extends Evented {
     }
 
     is3D() {
+        return false;
+    }
+
+    isSky() {
         return false;
     }
 

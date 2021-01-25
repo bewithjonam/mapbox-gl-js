@@ -1,10 +1,12 @@
 // @flow
 
-import {prelude} from '../shaders';
+import {prelude, preludeTerrain} from '../shaders';
 import assert from 'assert';
 import ProgramConfiguration from '../data/program_configuration';
 import VertexArrayObject from './vertex_array_object';
 import Context from '../gl/context';
+import {terrainUniforms} from '../terrain/terrain';
+import type {TerrainUniformsType} from '../terrain/terrain';
 
 import type SegmentVector from '../data/segment';
 import type VertexBuffer from '../gl/vertex_buffer';
@@ -21,6 +23,16 @@ export type DrawMode =
     | $PropertyType<WebGLRenderingContext, 'TRIANGLES'>
     | $PropertyType<WebGLRenderingContext, 'LINE_STRIP'>;
 
+function getTokenizedAttributesAndUniforms (array: Array<string>): Array<string> {
+    const result = [];
+
+    for (let i = 0; i < array.length; i++) {
+        if (array[i] === null) continue;
+        const token = array[i].split(' ');
+        result.push(token.pop());
+    }
+    return result;
+}
 class Program<Us: UniformBindings> {
     program: WebGLProgram;
     attributes: {[_: string]: number};
@@ -28,22 +40,43 @@ class Program<Us: UniformBindings> {
     fixedUniforms: Us;
     binderUniforms: Array<BinderUniform>;
     failedToCreate: boolean;
+    terrainUniforms: ?TerrainUniformsType;
+
+    static cacheKey(name: string, defines: string[], programConfiguration: ?ProgramConfiguration): string {
+        let key = `${name}${programConfiguration ? programConfiguration.cacheKey : ''}`;
+        for (const define of defines) {
+            key += `/${define}`;
+        }
+        return key;
+    }
 
     constructor(context: Context,
-                source: {fragmentSource: string, vertexSource: string},
+                name: string,
+                source: {fragmentSource: string, vertexSource: string, staticAttributes: Array<string>, staticUniforms: Array<string>},
                 configuration: ?ProgramConfiguration,
                 fixedUniforms: (Context, UniformLocations) => Us,
-                showOverdrawInspector: boolean) {
+                fixedDefines: string[]) {
         const gl = context.gl;
         this.program = gl.createProgram();
 
-        const defines = configuration ? configuration.defines() : [];
-        if (showOverdrawInspector) {
-            defines.push('#define OVERDRAW_INSPECTOR;');
+        const staticAttrInfo = getTokenizedAttributesAndUniforms(source.staticAttributes);
+        const dynamicAttrInfo = configuration ? configuration.getBinderAttributes() : [];
+        const allAttrInfo = staticAttrInfo.concat(dynamicAttrInfo);
+
+        const staticUniformsInfo = source.staticUniforms ? getTokenizedAttributesAndUniforms(source.staticUniforms) : [];
+        const dynamicUniformsInfo = configuration ? configuration.getBinderUniforms() : [];
+        // remove duplicate uniforms
+        const uniformList = staticUniformsInfo.concat(dynamicUniformsInfo);
+        const allUniformsInfo = [];
+        for (const uniform of uniformList) {
+            if (allUniformsInfo.indexOf(uniform) < 0) allUniformsInfo.push(uniform);
         }
 
+        let defines = configuration ? configuration.defines() : [];
+        defines = defines.concat(fixedDefines.map((define) => `#define ${define}`));
+
         const fragmentSource = defines.concat(prelude.fragmentSource, source.fragmentSource).join('\n');
-        const vertexSource = defines.concat(prelude.vertexSource, source.vertexSource).join('\n');
+        const vertexSource = defines.concat(prelude.vertexSource, preludeTerrain.vertexSource, source.vertexSource).join('\n');
         const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
         if (gl.isContextLost()) {
             this.failedToCreate = true;
@@ -64,13 +97,16 @@ class Program<Us: UniformBindings> {
         assert(gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS), (gl.getShaderInfoLog(vertexShader): any));
         gl.attachShader(this.program, vertexShader);
 
-        // Manually bind layout attributes in the order defined by their
-        // ProgramInterface so that we don't dynamically link an unused
-        // attribute at position 0, which can cause rendering to fail for an
-        // entire layer (see #4607, #4728)
-        const layoutAttributes = configuration ? configuration.layoutAttributes : [];
-        for (let i = 0; i < layoutAttributes.length; i++) {
-            gl.bindAttribLocation(this.program, i, layoutAttributes[i].name);
+        this.attributes = {};
+        const uniformLocations = {};
+
+        this.numAttributes = allAttrInfo.length;
+
+        for (let i = 0; i < this.numAttributes; i++) {
+            if (allAttrInfo[i]) {
+                gl.bindAttribLocation(this.program, i, allAttrInfo[i]);
+                this.attributes[allAttrInfo[i]] = i;
+            }
         }
 
         gl.linkProgram(this.program);
@@ -79,28 +115,31 @@ class Program<Us: UniformBindings> {
         gl.deleteShader(vertexShader);
         gl.deleteShader(fragmentShader);
 
-        this.numAttributes = gl.getProgramParameter(this.program, gl.ACTIVE_ATTRIBUTES);
-
-        this.attributes = {};
-        const uniformLocations = {};
-
-        for (let i = 0; i < this.numAttributes; i++) {
-            const attribute = gl.getActiveAttrib(this.program, i);
-            if (attribute) {
-                this.attributes[attribute.name] = gl.getAttribLocation(this.program, attribute.name);
-            }
-        }
-
-        const numUniforms = gl.getProgramParameter(this.program, gl.ACTIVE_UNIFORMS);
-        for (let i = 0; i < numUniforms; i++) {
-            const uniform = gl.getActiveUniform(this.program, i);
-            if (uniform) {
-                uniformLocations[uniform.name] = gl.getUniformLocation(this.program, uniform.name);
+        for (let it = 0; it < allUniformsInfo.length; it++) {
+            const uniform = allUniformsInfo[it];
+            if (uniform && !uniformLocations[uniform]) {
+                const uniformLocation = gl.getUniformLocation(this.program, uniform);
+                if (uniformLocation) {
+                    uniformLocations[uniform] = uniformLocation;
+                }
             }
         }
 
         this.fixedUniforms = fixedUniforms(context, uniformLocations);
         this.binderUniforms = configuration ? configuration.getUniforms(context, uniformLocations) : [];
+        if (fixedDefines.indexOf('TERRAIN') !== -1) { this.terrainUniforms = terrainUniforms(context, uniformLocations); }
+    }
+
+    setTerrainUniformValues(context: Context, terrainUnformValues: UniformValues<TerrainUniformsType>) {
+        if (!this.terrainUniforms) return;
+        const uniforms: TerrainUniformsType = this.terrainUniforms;
+
+        if (this.failedToCreate) return;
+        context.program.set(this.program);
+
+        for (const name in terrainUnformValues) {
+            uniforms[name].set(terrainUnformValues[name]);
+        }
     }
 
     draw(context: Context,

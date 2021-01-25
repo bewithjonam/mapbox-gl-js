@@ -25,7 +25,10 @@ import {setRTLTextPlugin, getRTLTextPluginStatus} from './source/rtl_text_plugin
 import WorkerPool from './util/worker_pool';
 import {prewarm, clearPrewarmedResources} from './util/global_worker_pool';
 import {clearTileCache} from './util/tile_request_cache';
+import {WorkerPerformanceUtils} from './util/worker_performance_utils';
 import {PerformanceUtils} from './util/performance';
+import {FreeCameraOptions} from './ui/free_camera';
+import browser from './util/browser';
 
 const exported = {
     version,
@@ -45,6 +48,7 @@ const exported = {
     LngLatBounds,
     Point,
     MercatorCoordinate,
+    FreeCameraOptions,
     Evented,
     config,
     /**
@@ -174,7 +178,7 @@ const exported = {
 };
 
 //This gets automatically stripped out in production builds.
-Debug.extend(exported, {isSafari, getPerformanceMetrics: PerformanceUtils.getPerformanceMetrics});
+Debug.extend(exported, {isSafari, getPerformanceMetrics: PerformanceUtils.getPerformanceMetrics, getPerformanceMetricsAsync: WorkerPerformanceUtils.getPerformanceMetricsAsync, setNow: browser.setNow, restoreNow: browser.restoreNow});
 
 /**
  * The version of Mapbox GL JS in use as specified in `package.json`,
@@ -193,7 +197,10 @@ Debug.extend(exported, {isSafari, getPerformanceMetrics: PerformanceUtils.getPer
  *   be dramatically worse than expected (e.g. a software WebGL renderer would be used).
  * @return {boolean}
  * @example
- * mapboxgl.supported() // = true
+ * // Show an alert if the browser does not support Mapbox GL
+ * if (!mapboxgl.supported()) {
+ *   alert('Your browser does not support Mapbox GL');
+ * }
  * @see [Check for browser support](https://www.mapbox.com/mapbox-gl-js/example/check-for-support/)
  */
 

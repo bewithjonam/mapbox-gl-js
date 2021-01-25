@@ -16,6 +16,10 @@ class RasterStyleLayer extends StyleLayer {
     constructor(layer: LayerSpecification) {
         super(layer, properties);
     }
+
+    getProgramIds() {
+        return ['raster'];
+    }
 }
 
 export default RasterStyleLayer;

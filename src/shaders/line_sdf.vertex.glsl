@@ -6,12 +6,9 @@
 // #define scale 63.0
 #define scale 0.015873016
 
-// We scale the distance before adding it to the buffers so that we can store
-// long distances for long segments. Use this value to unscale the distance.
-#define LINE_DISTANCE_SCALE 2.0
-
 attribute vec2 a_pos_normal;
 attribute vec4 a_data;
+attribute float a_linesofar;
 
 uniform mat4 u_matrix;
 uniform mediump float u_ratio;
@@ -51,7 +48,6 @@ void main() {
 
     vec2 a_extrude = a_data.xy - 128.0;
     float a_direction = mod(a_data.z, 4.0) - 1.0;
-    float a_linesofar = (floor(a_data.z / 4.0) + a_data.w * 64.0) * LINE_DISTANCE_SCALE;
 
     vec2 pos = floor(a_pos_normal * 0.5);
 
@@ -73,7 +69,7 @@ void main() {
 
     // Scale the extrusion vector down to a normal and then up by the line width
     // of this vertex.
-    mediump vec2 dist =outset * a_extrude * scale;
+    mediump vec2 dist = outset * a_extrude * scale;
 
     // Calculate the offset when drawing a line that is to the side of the actual line.
     // We do this by creating a vector that points towards the extrude, but rotate
@@ -86,10 +82,14 @@ void main() {
     vec4 projected_extrude = u_matrix * vec4(dist / u_ratio, 0.0, 0.0);
     gl_Position = u_matrix * vec4(pos + offset2 / u_ratio, 0.0, 1.0) + projected_extrude;
 
+#ifndef RENDER_TO_TEXTURE
     // calculate how much the perspective view squishes or stretches the extrude
     float extrude_length_without_perspective = length(dist);
     float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * u_units_to_pixels);
     v_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
+#else
+    v_gamma_scale = 1.0;
+#endif
 
     v_tex_a = vec2(a_linesofar * u_patternscale_a.x / floorwidth, normal.y * u_patternscale_a.y + u_tex_y_a);
     v_tex_b = vec2(a_linesofar * u_patternscale_b.x / floorwidth, normal.y * u_patternscale_b.y + u_tex_y_b);

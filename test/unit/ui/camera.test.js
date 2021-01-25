@@ -1,10 +1,14 @@
 import {test} from '../../util/test';
 import Camera from '../../../src/ui/camera';
+import {FreeCameraOptions} from '../../../src/ui/free_camera';
 import Transform from '../../../src/geo/transform';
 import TaskQueue from '../../../src/util/task_queue';
 import browser from '../../../src/util/browser';
-import {fixedLngLat, fixedNum} from '../../util/fixed';
+import {fixedLngLat, fixedNum, fixedVec3} from '../../util/fixed';
 import {equalWithPrecision} from '../../util';
+import MercatorCoordinate from '../../../src/geo/mercator_coordinate';
+import LngLat from '../../../src/geo/lng_lat';
+import {vec3, quat} from 'gl-matrix';
 
 test('camera', (t) => {
     function attachSimulateFrame(camera) {
@@ -18,7 +22,7 @@ test('camera', (t) => {
     function createCamera(options) {
         options = options || {};
 
-        const transform = new Transform(0, 20, 0, 60, options.renderWorldCopies);
+        const transform = new Transform(0, 20, 0, 85, options.renderWorldCopies);
         transform.resize(512, 512);
 
         const camera = attachSimulateFrame(new Camera(transform, {}))
@@ -1797,13 +1801,35 @@ test('camera', (t) => {
     });
 
     t.test('#cameraForBounds', (t) => {
-        t.test('no padding passed', (t) => {
+        t.test('no options passed', (t) => {
             const camera = createCamera();
             const bb = [[-133, 16], [-68, 50]];
 
             const transform = camera.cameraForBounds(bb);
             t.deepEqual(fixedLngLat(transform.center, 4), {lng: -100.5, lat: 34.7171}, 'correctly calculates coordinates for new bounds');
             t.equal(fixedNum(transform.zoom, 3), 2.469);
+            t.end();
+        });
+
+        t.test('bearing positive number', (t) => {
+            const camera = createCamera();
+            const bb = [[-133, 16], [-68, 50]];
+
+            const transform = camera.cameraForBounds(bb, {bearing: 175});
+            t.deepEqual(fixedLngLat(transform.center, 4), {lng: -100.5, lat: 34.7171}, 'correctly calculates coordinates for new bounds');
+            t.equal(fixedNum(transform.zoom, 3), 2.558);
+            t.equal(transform.bearing, 175);
+            t.end();
+        });
+
+        t.test('bearing negative number', (t) => {
+            const camera = createCamera();
+            const bb = [[-133, 16], [-68, 50]];
+
+            const transform = camera.cameraForBounds(bb, {bearing: -30});
+            t.deepEqual(fixedLngLat(transform.center, 4), {lng: -100.5, lat: 34.7171}, 'correctly calculates coordinates for new bounds');
+            t.equal(fixedNum(transform.zoom, 3), 2.392);
+            t.equal(transform.bearing, -30);
             t.end();
         });
 
@@ -1826,12 +1852,21 @@ test('camera', (t) => {
             t.end();
         });
 
-        t.test('asymetrical padding', (t) => {
+        t.test('asymmetrical padding', (t) => {
             const camera = createCamera();
             const bb = [[-133, 16], [-68, 50]];
 
             const transform = camera.cameraForBounds(bb, {padding: {top: 10, right: 75, bottom: 50, left: 25}, duration: 0});
             t.deepEqual(fixedLngLat(transform.center, 4), {lng: -96.5558, lat: 32.0833}, 'correctly calculates coordinates for bounds with padding option as object applied');
+            t.end();
+        });
+
+        t.test('bearing and asymmetrical padding', (t) => {
+            const camera = createCamera();
+            const bb = [[-133, 16], [-68, 50]];
+
+            const transform = camera.cameraForBounds(bb, {bearing: 90, padding: {top: 10, right: 75, bottom: 50, left: 25}, duration: 0});
+            t.deepEqual(fixedLngLat(transform.center, 4), {lng: -103.3761, lat: 31.7099}, 'correctly calculates coordinates for bounds with bearing and padding option as object applied');
             t.end();
         });
 
@@ -1859,6 +1894,15 @@ test('camera', (t) => {
 
             const transform = camera.cameraForBounds(bb, {padding: {top: 10, right: 75, bottom: 50, left: 25}, offset: [0, 100]});
             t.deepEqual(fixedLngLat(transform.center, 4), {lng: -96.5558, lat: 44.4189}, 'correctly calculates coordinates for bounds with padding option as object applied');
+            t.end();
+        });
+
+        t.test('bearing, asymmetrical padding, and offset', (t) => {
+            const camera = createCamera();
+            const bb = [[-133, 16], [-68, 50]];
+
+            const transform = camera.cameraForBounds(bb, {bearing: 90, padding: {top: 10, right: 75, bottom: 50, left: 25}, offset: [0, 100], duration: 0});
+            t.deepEqual(fixedLngLat(transform.center, 4), {lng: -103.3761, lat: 43.0929}, 'correctly calculates coordinates for bounds with bearing, padding option as object, and offset applied');
             t.end();
         });
 
@@ -1924,6 +1968,38 @@ test('camera', (t) => {
             t.deepEqual(fixedLngLat(camera.getCenter(), 4), {lng: -45, lat: 40.9799}, 'centers, rotates 225 degrees, and zooms based on screen coordinates');
             t.equal(fixedNum(camera.getZoom(), 3), 1.5);
             t.equal(camera.getBearing(), -135);
+            t.equal(camera.getPitch(), 0);
+            t.end();
+        });
+
+        t.test('bearing 225, pitch 30', (t) => {
+            const pitch = 30;
+            const camera = createCamera({pitch});
+            const p0 = [200, 500];
+            const p1 = [210, 510];
+            const bearing = 225;
+
+            camera.fitScreenCoordinates(p0, p1, bearing, {duration:0});
+            t.deepEqual(fixedLngLat(camera.getCenter(), 4), {lng: -30.215, lat: -19.8767}, 'centers, rotates 225 degrees, pitch 30 degrees, and zooms based on screen coordinates');
+            t.equal(fixedNum(camera.getZoom(), 3), 0.173);
+            t.equal(camera.getBearing(), -16.844931165335765);
+            t.end();
+        });
+
+        t.test('bearing 225, pitch 80, over horizon', (t) => {
+            const pitch = 80;
+            const camera = createCamera({pitch});
+            const p0 = [128, 0];
+            const p1 = [256, 10];
+            const bearing = 225;
+
+            const zoom = camera.getZoom();
+            const center = camera.getCenter();
+            camera.fitScreenCoordinates(p0, p1, bearing, {duration:0});
+            t.deepEqual(fixedLngLat(camera.getCenter(), 4), center, 'centers, rotates 225 degrees, pitch 80 degrees, and zooms based on screen coordinates');
+            t.equal(fixedNum(camera.getZoom(), 3), zoom);
+            t.equal(camera.getBearing(), 0);
+            t.equal(camera.getPitch(), pitch);
             t.end();
         });
 
@@ -1951,6 +2027,250 @@ test('camera', (t) => {
             t.deepEqual(fixedLngLat(camera.getCenter(), 4), {lng: -45, lat: 40.9799}, 'centers and zooms based on screen coordinates in opposite order');
             t.equal(fixedNum(camera.getZoom(), 3), 2);
             t.equal(camera.getBearing(), 0);
+            t.end();
+        });
+
+        t.end();
+    });
+
+    test('FreeCameraOptions', (t) => {
+
+        const camera = createCamera();
+
+        const rotatedFrame = (quaternion) => {
+            return {
+                up: vec3.transformQuat([], [0, -1, 0], quaternion),
+                forward: vec3.transformQuat([], [0, 0, -1], quaternion),
+                right: vec3.transformQuat([], [1, 0, 0], quaternion)
+            };
+        };
+
+        test('lookAtPoint', (t) => {
+            const options = new FreeCameraOptions();
+            const cosPi4 = fixedNum(1.0 / Math.sqrt(2.0));
+            let frame = null;
+
+            // Pitch: 45, bearing: 0
+            options.position = new MercatorCoordinate(0.5, 0.5, 0.5);
+            options.lookAtPoint(new LngLat(0.0, 85.051128779806604));
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+
+            t.deepEqual(fixedVec3(frame.right), [1, 0, 0]);
+            t.deepEqual(fixedVec3(frame.up), [0, -cosPi4, cosPi4]);
+            t.deepEqual(fixedVec3(frame.forward), [0, -cosPi4, -cosPi4]);
+
+            // Look directly to east
+            options.position = new MercatorCoordinate(0.5, 0.5, 0.0);
+            options.lookAtPoint(new LngLat(30, 0));
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+
+            t.deepEqual(fixedVec3(frame.right), [0, 1, 0]);
+            t.deepEqual(fixedVec3(frame.up), [0, 0, 1]);
+            t.deepEqual(fixedVec3(frame.forward), [1, 0, 0]);
+
+            // Pitch: 0, bearing: 0
+            options.position = MercatorCoordinate.fromLngLat(new LngLat(24.9384, 60.1699), 100.0);
+            options.lookAtPoint(new LngLat(24.9384, 60.1699), [0.0, -1.0, 0.0]);
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+
+            t.deepEqual(fixedVec3(frame.right), [1.0, 0.0, 0.0]);
+            t.deepEqual(fixedVec3(frame.up), [0.0, -1.0, 0.0]);
+            t.deepEqual(fixedVec3(frame.forward), [0.0, 0.0, -1.0]);
+
+            // Pitch: 0, bearing: 45
+            options.position = MercatorCoordinate.fromLngLat(new LngLat(24.9384, 60.1699), 100.0);
+            options.lookAtPoint(new LngLat(24.9384, 60.1699), [-1.0, -1.0, 0.0]);
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+
+            t.deepEqual(fixedVec3(frame.right), [cosPi4, -cosPi4, 0.0]);
+            t.deepEqual(fixedVec3(frame.up), [-cosPi4, -cosPi4, 0.0]);
+            t.deepEqual(fixedVec3(frame.forward), [0.0, 0.0, -1.0]);
+
+            // Looking south, up vector almost same as forward vector
+            options.position = MercatorCoordinate.fromLngLat(new LngLat(122.4194, 37.7749));
+            options.lookAtPoint(new LngLat(122.4194, 37.5), [0.0, 1.0, 0.00001]);
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+
+            t.deepEqual(fixedVec3(frame.right), [-1.0, 0.0, 0.0]);
+            t.deepEqual(fixedVec3(frame.up), [0.0, 0.0, 1.0]);
+            t.deepEqual(fixedVec3(frame.forward), [0.0, 1.0, 0.0]);
+
+            // Orientation with roll-component
+            options.position = MercatorCoordinate.fromLngLat(new LngLat(151.2093, -33.8688));
+            options.lookAtPoint(new LngLat(160.0, -33.8688), [0.0, -1.0, 0.1]);
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+
+            t.deepEqual(fixedVec3(frame.right), [0.0, 1.0, 0.0]);
+            t.deepEqual(fixedVec3(frame.up), [0.0, 0.0, 1.0]);
+            t.deepEqual(fixedVec3(frame.forward), [1.0, 0.0, 0.0]);
+
+            // Up vector pointing downwards
+            options.position = new MercatorCoordinate(0.5, 0.5, 0.5);
+            options.lookAtPoint(new LngLat(0.0, 85.051128779806604), [0.0, 0.0, -0.5]);
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+
+            t.deepEqual(fixedVec3(frame.right), [1.0, 0.0, 0.0]);
+            t.deepEqual(fixedVec3(frame.up), [0.0, -cosPi4, cosPi4]);
+            t.deepEqual(fixedVec3(frame.forward), [0.0, -cosPi4, -cosPi4]);
+
+            test('invalid input', (t) => {
+                const options = new FreeCameraOptions();
+
+                // Position not set
+                options.orientation = [0, 0, 0, 0];
+                options.lookAtPoint(new LngLat(0, 0));
+                t.false(options.orientation);
+
+                // Target same as position
+                options.orientation = [0, 0, 0, 0];
+                options.position = new MercatorCoordinate(0.5, 0.5, 0.0);
+                options.lookAtPoint(new LngLat(0, 0));
+                t.false(options.orientation);
+
+                // Camera looking directly down without an explicit up vector
+                options.orientation = [0, 0, 0, 0];
+                options.position = new MercatorCoordinate(0.5, 0.5, 0.5);
+                options.lookAtPoint(new LngLat(0, 0));
+                t.false(options.orientation);
+
+                // Zero length up vector
+                options.orientation = [0, 0, 0, 0];
+                options.lookAtPoint(new LngLat(0, 0), [0, 0, 0]);
+                t.false(options.orientation);
+
+                // Up vector same as direction
+                options.orientation = [0, 0, 0, 0];
+                options.lookAtPoint(new LngLat(0, 0), [0, 0, -1]);
+                t.false(options.orientation);
+
+                t.end();
+            });
+
+            t.end();
+        });
+
+        test('setPitchBearing', (t) => {
+            const options = new FreeCameraOptions();
+            const cos60 = fixedNum(Math.cos(60 * Math.PI / 180.0));
+            const sin60 = fixedNum(Math.sin(60 * Math.PI / 180.0));
+            let frame = null;
+
+            options.setPitchBearing(0, 0);
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+            t.deepEqual(fixedVec3(frame.right), [1, 0, 0]);
+            t.deepEqual(fixedVec3(frame.up), [0, -1, 0]);
+            t.deepEqual(fixedVec3(frame.forward), [0, 0, -1]);
+
+            options.setPitchBearing(0, 180);
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+            t.deepEqual(fixedVec3(frame.right), [-1, 0, 0]);
+            t.deepEqual(fixedVec3(frame.up), [0, 1, 0]);
+            t.deepEqual(fixedVec3(frame.forward), [0, 0, -1]);
+
+            options.setPitchBearing(60, 0);
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+            t.deepEqual(fixedVec3(frame.right), [1, 0, 0]);
+            t.deepEqual(fixedVec3(frame.up), [0, -cos60, sin60]);
+            t.deepEqual(fixedVec3(frame.forward), [0, -sin60, -cos60]);
+
+            options.setPitchBearing(60, -450);
+            t.true(options.orientation);
+            frame = rotatedFrame(options.orientation);
+            t.deepEqual(fixedVec3(frame.right), [0, -1, 0]);
+            t.deepEqual(fixedVec3(frame.up), [-cos60, 0, sin60]);
+            t.deepEqual(fixedVec3(frame.forward), [-sin60, 0, -cos60]);
+
+            t.end();
+        });
+
+        t.test('emits move events', (t) => {
+            let started, moved, ended;
+            const eventData = {data: 'ok'};
+
+            camera
+                .on('movestart', (d) => { started = d.data; })
+                .on('move', (d) => { moved = d.data; })
+                .on('moveend', (d) => { ended = d.data; });
+
+            const options = camera.getFreeCameraOptions();
+            options.position.x = 0.2;
+            options.position.y = 0.2;
+            camera.setFreeCameraOptions(options, eventData);
+
+            t.equal(started, 'ok');
+            t.equal(moved, 'ok');
+            t.equal(ended, 'ok');
+            t.end();
+        });
+
+        t.test('changing orientation emits bearing events', (t) => {
+            let rotatestarted, rotated, rotateended, pitch;
+            const eventData = {data: 'ok'};
+
+            camera
+                .on('rotatestart', (d) => { rotatestarted = d.data; })
+                .on('rotate', (d) => { rotated = d.data; })
+                .on('rotateend', (d) => { rotateended = d.data; })
+                .on('pitch', (d) => { pitch = d.data; });
+
+            const options = camera.getFreeCameraOptions();
+            quat.rotateZ(options.orientation, options.orientation, 0.1);
+            camera.setFreeCameraOptions(options, eventData);
+
+            t.equal(rotatestarted, 'ok');
+            t.equal(rotated, 'ok');
+            t.equal(rotateended, 'ok');
+            t.equal(pitch, undefined);
+            t.end();
+        });
+
+        t.test('changing orientation emits pitch events', (t) => {
+            let  pitchstarted, pitch, pitchended, rotated;
+            const eventData = {data: 'ok'};
+
+            camera
+                .on('pitchstart', (d) => { pitchstarted = d.data; })
+                .on('pitch', (d) => { pitch = d.data; })
+                .on('pitchend', (d) => { pitchended = d.data; })
+                .on('rotate', (d) => { rotated = d.data; });
+
+            const options = camera.getFreeCameraOptions();
+            quat.rotateX(options.orientation, options.orientation, -0.1);
+            camera.setFreeCameraOptions(options, eventData);
+
+            t.equal(pitchstarted, 'ok');
+            t.equal(pitch, 'ok');
+            t.equal(pitchended, 'ok');
+            t.equal(rotated, undefined);
+            t.end();
+        });
+
+        t.test('changing altitude emits zoom events', (t) => {
+            let zoomstarted, zoom, zoomended;
+            const eventData = {data: 'ok'};
+
+            camera
+                .on('zoomstart', (d) => { zoomstarted = d.data; })
+                .on('zoom', (d) => { zoom = d.data; })
+                .on('zoomend', (d) => { zoomended = d.data; });
+
+            const options = camera.getFreeCameraOptions();
+            options.position.z *= 0.8;
+            camera.setFreeCameraOptions(options, eventData);
+
+            t.equal(zoomstarted, 'ok');
+            t.equal(zoom, 'ok');
+            t.equal(zoomended, 'ok');
             t.end();
         });
 

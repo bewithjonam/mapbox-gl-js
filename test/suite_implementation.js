@@ -8,6 +8,10 @@ import rtlText from '@mapbox/mapbox-gl-rtl-text';
 import fs from 'fs';
 import path from 'path';
 import customLayerImplementations from './integration/custom_layer_implementations';
+import MercatorCoordinate, {mercatorZfromAltitude} from '../src/geo/mercator_coordinate';
+import LngLat from '../src/geo/lng_lat';
+import {clamp} from '../src/util/util';
+import {vec3, vec4} from 'gl-matrix';
 
 rtlTextPlugin['applyArabicShaping'] = rtlText.applyArabicShaping;
 rtlTextPlugin['processBidirectionalText'] = rtlText.processBidirectionalText;
@@ -67,37 +71,39 @@ module.exports = function(style, options, _callback) { // eslint-disable-line im
     if (options.debug) map.showTileBoundaries = true;
     if (options.showOverdrawInspector) map.showOverdrawInspector = true;
     if (options.showPadding) map.showPadding = true;
+    if (options.collisionDebug) map.showCollisionBoxes = true;
+
+    // Disable anisotropic filtering on render tests
+    map.painter.context.extTextureFilterAnisotropicForceOff = true;
 
     const gl = map.painter.context.gl;
-
     map.once('load', () => {
-        if (options.collisionDebug) {
-            map.showCollisionBoxes = true;
-            if (options.operations) {
-                options.operations.push(["wait"]);
-            } else {
-                options.operations = [["wait"]];
-            }
-        }
         applyOperations(map, options.operations, () => {
             const viewport = gl.getParameter(gl.VIEWPORT);
             const w = viewport[2];
             const h = viewport[3];
+            let data;
 
-            const pixels = new Uint8Array(w * h * 4);
-            gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+            if (options.output === "terrainDepth") {
+                const pixels = drawTerrainDepth(map, w, h);
+                data = new Buffer(pixels);
+            }
 
-            const data = new Buffer(pixels);
+            if (!data) {
+                const pixels = new Uint8Array(w * h * 4);
+                gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                data = new Buffer(pixels);
 
-            // Flip the scanlines.
-            const stride = w * 4;
-            const tmp = new Buffer(stride);
-            for (let i = 0, j = h - 1; i < j; i++, j--) {
-                const start = i * stride;
-                const end = j * stride;
-                data.copy(tmp, 0, start, start + stride);
-                data.copy(data, start, end, end + stride);
-                tmp.copy(data, end);
+                // Flip the scanlines.
+                const stride = w * 4;
+                const tmp = new Buffer(stride);
+                for (let i = 0, j = h - 1; i < j; i++, j--) {
+                    const start = i * stride;
+                    const end = j * stride;
+                    data.copy(tmp, 0, start, start + stride);
+                    data.copy(data, start, end, end + stride);
+                    tmp.copy(data, end);
+                }
             }
 
             const results = options.queryGeometry ?
@@ -125,8 +131,11 @@ module.exports = function(style, options, _callback) { // eslint-disable-line im
     function applyOperations(map, operations, callback) {
         const operation = operations && operations[0];
         if (!operations || operations.length === 0) {
+            if (options.terrainDrapeFirst && map.painter.terrain) {
+                map.painter.terrain.forceDrapeFirst = true;
+                map._render(); // Render one more time with forceDrapeFirst.
+            }
             callback();
-
         } else if (operation[0] === 'wait') {
             if (operation.length > 1) {
                 now += operation[1];
@@ -176,9 +185,25 @@ module.exports = function(style, options, _callback) { // eslint-disable-line im
         } else if (operation[0] === 'pauseSource') {
             map.style.sourceCaches[operation[1]].pause();
             applyOperations(map, operations.slice(1), callback);
+        } else if (operation[0] === 'setCameraPosition') {
+            const options = map.getFreeCameraOptions();
+            const location = operation[1];  // lng, lat, altitude
+            options.position = MercatorCoordinate.fromLngLat(new LngLat(location[0], location[1]), location[2]);
+            map.setFreeCameraOptions(options);
+            applyOperations(map, operations.slice(1), callback);
+        } else if (operation[0] === 'lookAtPoint') {
+            const options = map.getFreeCameraOptions();
+            const location = operation[1];
+            const upVector = operation[2];
+            options.lookAtPoint(new LngLat(location[0], location[1]), upVector);
+            map.setFreeCameraOptions(options);
+            applyOperations(map, operations.slice(1), callback);
         } else {
             if (typeof map[operation[0]] === 'function') {
                 map[operation[0]](...operation.slice(1));
+            }
+            if (options.terrainDrapeFirst && map.painter.terrain) {
+                map.painter.terrain.forceDrapeFirst = true;
             }
             applyOperations(map, operations.slice(1), callback);
         }
@@ -199,4 +224,94 @@ function updateFakeCanvas(document, id, imagePath) {
     const fakeCanvas = document.getElementById(id);
     const image = PNG.sync.read(fs.readFileSync(path.join(__dirname, './integration', imagePath)));
     fakeCanvas.data = image.data;
+}
+
+function drawTerrainDepth(map, width, height) {
+    if (!map.painter.terrain)
+        return undefined;
+
+    const terrain = map.painter.terrain;
+    const tr = map.transform;
+    const ws = tr.worldSize;
+
+    // Compute frustum corner points in web mercator [0, 1] space where altitude is in meters
+    const clipSpaceCorners = [
+        [-1, 1, -1, 1],
+        [ 1, 1, -1, 1],
+        [ 1, -1, -1, 1],
+        [-1, -1, -1, 1],
+        [-1, 1, 1, 1],
+        [ 1, 1, 1, 1],
+        [ 1, -1, 1, 1],
+        [-1, -1, 1, 1]
+    ];
+
+    const frustumCoords = clipSpaceCorners
+        .map(v => {
+            const s = vec4.transformMat4([], v, tr.invProjMatrix);
+            const k = 1.0 / s[3] / ws;
+            // Z scale in meters.
+            return vec4.mul(s, s, [k, k, 1.0 / s[3], k]);
+        });
+
+    const nearTL = frustumCoords[0];
+    const nearTR = frustumCoords[1];
+    const nearBL = frustumCoords[3];
+    const farTL = frustumCoords[4];
+    const farTR = frustumCoords[5];
+    const farBL = frustumCoords[7];
+
+    // Compute basis vectors X & Y of near and far planes in transformed space.
+    // These vectors are then interpolated to find corresponding world rays for each screen pixel.
+    const nearRight = vec3.sub([], nearTR, nearTL);
+    const nearDown = vec3.sub([], nearBL, nearTL);
+    const farRight = vec3.sub([], farTR, farTL);
+    const farDown = vec3.sub([], farBL, farTL);
+
+    const distances = [];
+    const data = [];
+    const metersToPixels = mercatorZfromAltitude(1.0, tr.center.lat);
+    let minDistance = Number.MAX_VALUE;
+    let maxDistance = 0;
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            // Use uv-coordinates of the screen pixel to find positions on near and far planes
+            const u = (x + 0.5) / width;
+            const v = (y + 0.5) / height;
+
+            const startPoint = vec3.add([], nearTL, vec3.add([], vec3.scale([], nearRight, u), vec3.scale([], nearDown, v)));
+            const endPoint = vec3.add([], farTL, vec3.add([], vec3.scale([], farRight, u), vec3.scale([], farDown, v)));
+            const dir = vec3.normalize([], vec3.sub([], endPoint, startPoint));
+            const t = terrain.raycast(startPoint, dir, terrain.exaggeration());
+
+            if (t !== null) {
+                // The ray hit the terrain. Compute distance in world space and store to an intermediate array
+                const point = vec3.scaleAndAdd([], startPoint, dir, t);
+                const startToPoint = vec3.sub([], point, startPoint);
+                startToPoint[2] *= metersToPixels;
+
+                const distance = vec3.length(startToPoint) * ws;
+                distances.push(distance);
+                minDistance = Math.min(distance, minDistance);
+                maxDistance = Math.max(distance, maxDistance);
+            } else {
+                distances.push(null);
+            }
+        }
+    }
+
+    // Convert distance data to pixels;
+    for (let i = 0; i < width * height; i++) {
+        if (distances[i] === null) {
+            // Bright white pixel for non-intersections
+            data.push(255, 255, 255, 255);
+        } else {
+            let value = (distances[i] - minDistance) / (maxDistance - minDistance);
+            value = Math.floor((clamp(value, 0.0, 1.0)) * 255);
+            data.push(value, value, value, 255);
+        }
+    }
+
+    return data;
 }

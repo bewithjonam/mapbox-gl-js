@@ -7,11 +7,11 @@ import {ease as _ease, bindAll, bezier} from '../../util/util';
 import browser from '../../util/browser';
 import window from '../../util/window';
 import {number as interpolate} from '../../style-spec/util/interpolate';
-import LngLat from '../../geo/lng_lat';
+import Point from '@mapbox/point-geometry';
 
 import type Map from '../map';
 import type HandlerManager from '../handler_manager';
-import type Point from '@mapbox/point-geometry';
+import MercatorCoordinate from '../../geo/mercator_coordinate';
 
 // deltaY value for mouse scroll wheel identification
 const wheelZoomDelta = 4.000244140625;
@@ -35,8 +35,8 @@ class ScrollZoomHandler {
     _active: boolean;
     _zooming: boolean;
     _aroundCenter: boolean;
-    _around: Point;
     _aroundPoint: Point;
+    _aroundCoord: MercatorCoordinate;
     _type: 'wheel' | 'trackpad' | null;
     _lastValue: number;
     _timeout: ?TimeoutID; // used for delayed-handling of a single wheel movement
@@ -70,12 +70,7 @@ class ScrollZoomHandler {
         this._defaultZoomRate = defaultZoomRate;
         this._wheelZoomRate = wheelZoomRate;
 
-        bindAll([
-            '_onWheel',
-            '_onTimeout',
-            '_onScrollFrame',
-            '_onScrollFinished'
-        ], this);
+        bindAll(['_onTimeout'], this);
     }
 
     /**
@@ -231,9 +226,10 @@ class ScrollZoomHandler {
         }
 
         const pos = DOM.mousePos(this._el, e);
+        this._aroundPoint = this._aroundCenter ? this._map.transform.centerPoint : pos;
+        this._aroundCoord = this._map.transform.pointCoordinate3D(this._aroundPoint);
+        this._targetZoom = undefined;
 
-        this._around = LngLat.convert(this._aroundCenter ? this._map.getCenter() : this._map.unproject(pos));
-        this._aroundPoint = this._map.transform.locationPoint(this._around);
         if (!this._frameId) {
             this._frameId = true;
             this._handler._triggerRenderFrame();
@@ -241,15 +237,15 @@ class ScrollZoomHandler {
     }
 
     renderFrame() {
-        return this._onScrollFrame();
-    }
-
-    _onScrollFrame() {
         if (!this._frameId) return;
         this._frameId = null;
 
         if (!this.isActive()) return;
         const tr = this._map.transform;
+
+        const startingZoom = () => {
+            return tr._terrainEnabled() ? tr.computeZoomRelativeTo(this._aroundCoord) : tr.zoom;
+        };
 
         // if we've had scroll events since the last render frame, consume the
         // accumulated delta, and update the target zoom level accordingly
@@ -263,22 +259,24 @@ class ScrollZoomHandler {
                 scale = 1 / scale;
             }
 
-            const fromScale = typeof this._targetZoom === 'number' ? tr.zoomScale(this._targetZoom) : tr.scale;
+            const startZoom = startingZoom();
+            const startScale = Math.pow(2.0, startZoom);
+
+            const fromScale = typeof this._targetZoom === 'number' ? tr.zoomScale(this._targetZoom) : startScale;
             this._targetZoom = Math.min(tr.maxZoom, Math.max(tr.minZoom, tr.scaleZoom(fromScale * scale)));
 
             // if this is a mouse wheel, refresh the starting zoom and easing
             // function we're using to smooth out the zooming between wheel
             // events
             if (this._type === 'wheel') {
-                this._startZoom = tr.zoom;
+                this._startZoom = startingZoom();
                 this._easing = this._smoothOutEasing(200);
             }
 
             this._delta = 0;
         }
-
         const targetZoom = typeof this._targetZoom === 'number' ?
-            this._targetZoom : tr.zoom;
+            this._targetZoom : startingZoom();
         const startZoom = this._startZoom;
         const easing = this._easing;
 
@@ -317,8 +315,9 @@ class ScrollZoomHandler {
         return {
             noInertia: true,
             needsRenderFrame: !finished,
-            zoomDelta: zoom - tr.zoom,
+            zoomDelta: zoom - startingZoom(),
             around: this._aroundPoint,
+            aroundCoord: this._aroundCoord,
             originalEvent: this._lastWheelEvent
         };
     }

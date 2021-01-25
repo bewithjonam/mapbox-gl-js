@@ -66,6 +66,7 @@ export type StyleSpecification = {|
     "bearing"?: number,
     "pitch"?: number,
     "light"?: LightSpecification,
+    "terrain"?: TerrainSpecification,
     "sources": {[_: string]: SourceSpecification},
     "sprite"?: string,
     "glyphs"?: string,
@@ -80,6 +81,11 @@ export type LightSpecification = {|
     "intensity"?: PropertyValueSpecification<number>
 |}
 
+export type TerrainSpecification = {|
+    "source": string,
+    "exaggeration"?: PropertyValueSpecification<number>
+|}
+
 export type VectorSourceSpecification = {
     "type": "vector",
     "url"?: string,
@@ -92,7 +98,8 @@ export type VectorSourceSpecification = {
     "cluster"?: boolean,
     "clusterRadius"?: number,
     "clusterProperties"?: mixed,
-    "promoteId"?: PromoteIdSpecification
+    "promoteId"?: PromoteIdSpecification,
+    "volatile"?: boolean
 }
 
 export type RasterSourceSpecification = {
@@ -104,7 +111,8 @@ export type RasterSourceSpecification = {
     "maxzoom"?: number,
     "tileSize"?: number,
     "scheme"?: "xyz" | "tms",
-    "attribution"?: string
+    "attribution"?: string,
+    "volatile"?: boolean
 }
 
 export type RasterDEMSourceSpecification = {
@@ -116,7 +124,8 @@ export type RasterDEMSourceSpecification = {
     "maxzoom"?: number,
     "tileSize"?: number,
     "attribution"?: string,
-    "encoding"?: "terrarium" | "mapbox"
+    "encoding"?: "terrarium" | "mapbox",
+    "volatile"?: boolean
 }
 
 export type GeoJSONSourceSpecification = {|
@@ -125,10 +134,12 @@ export type GeoJSONSourceSpecification = {|
     "maxzoom"?: number,
     "attribution"?: string,
     "buffer"?: number,
+    "filter"?: mixed,
     "tolerance"?: number,
     "cluster"?: boolean,
     "clusterRadius"?: number,
     "clusterMaxZoom"?: number,
+    "clusterMinPoints"?: number,
     "clusterProperties"?: mixed,
     "lineMetrics"?: boolean,
     "generateId"?: boolean,
@@ -417,6 +428,28 @@ export type BackgroundLayerSpecification = {|
     |}
 |}
 
+export type SkyLayerSpecification = {|
+    "id": string,
+    "type": "sky",
+    "metadata"?: mixed,
+    "minzoom"?: number,
+    "maxzoom"?: number,
+    "layout"?: {|
+        "visibility"?: "visible" | "none"
+    |},
+    "paint"?: {|
+        "sky-type"?: PropertyValueSpecification<"gradient" | "atmosphere">,
+        "sky-atmosphere-sun"?: PropertyValueSpecification<[number, number]>,
+        "sky-atmosphere-sun-intensity"?: number,
+        "sky-gradient-center"?: PropertyValueSpecification<[number, number]>,
+        "sky-gradient-radius"?: PropertyValueSpecification<number>,
+        "sky-gradient"?: ExpressionSpecification,
+        "sky-atmosphere-halo-color"?: ColorSpecification,
+        "sky-atmosphere-color"?: ColorSpecification,
+        "sky-opacity"?: PropertyValueSpecification<number>
+    |}
+|}
+
 export type LayerSpecification =
     | FillLayerSpecification
     | LineLayerSpecification
@@ -426,5 +459,6 @@ export type LayerSpecification =
     | FillExtrusionLayerSpecification
     | RasterLayerSpecification
     | HillshadeLayerSpecification
-    | BackgroundLayerSpecification;
+    | BackgroundLayerSpecification
+    | SkyLayerSpecification;
 
